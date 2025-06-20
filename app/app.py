@@ -15,4 +15,14 @@ def hello():
     return {"detail": "Welcome to the AI for Bariatric Surgery API!"}
 
 
+@app.post("/test1")
+def test1():
+    return {"detail": "Test 1 successful!"}
+
+
+@app.post("/test2")
+def test2():
+    return {"detail": "Test 2 successful!"}
+
+
 handler = Mangum(app)
