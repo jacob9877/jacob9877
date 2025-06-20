@@ -1,36 +1,37 @@
-name: Deploy FastAPI to Lambda
+name: Deploy FastAPI to AWS Lambda
 
 on:
   push:
     branches:
-      - main
+      - main # This automation/workflow runs only when code is pushed to the 'main' branch
 
 jobs:
   deploy:
     name: Deploy FastAPI to AWS Lambda
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # The automation will run on the latest Ubuntu runner provided by GitHub
 
+    # Set required environment variables / constants for this job
     env:
-      LAMBDA_FUNCTION_NAME: AI-for-Bariatric-Surgery_API # <- Change this
-      ZIP_FILE: lambda_package.zip
+      LAMBDA_FUNCTION_NAME: AI-for-Bariatric-Surgery_API
+      ZIP_FILE_NAME: lambda_package.zip
 
     steps:
+      # Step 1: Checkout the code from your GitHub repository
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v3 # This action pulls your repository code into the workflow runner
 
+      # Step 2: Set up Python 3.11 on the runner
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: "3.11" # Specifies the Python version to use
+          cache: "pip" # Caches pip dependencies (python package files) to speed up future runs
 
-      - name: Create virtual environment
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
+      # Step 3: Package the application for AWS Lambda deployment:
+      # - Create a directory for the package
+      # - Install Python dependencies into that directory
+      # - Copy the main application file into the package directory
+      # - Zip the package directory into a file for deployment
       - name: Package application
         run: |
           mkdir -p package
@@ -38,17 +39,20 @@ jobs:
           pip install -r requirements.txt --target package/
           cp app.py package/
           cd package
-          zip -r ../$ZIP_FILE .
+          zip -r ../$ZIP_FILE_NAME .
 
+      # Step 4: Configure AWS credentials so the workflow can interact with AWS services
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }} # AWS access key stored securely in GitHub Secrets
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # AWS secret key stored securely in GitHub Secrets
+          aws-region: ${{ secrets.AWS_REGION }} # AWS region where the Lambda function is deployed, also stored in GitHub Secrets
 
+      # Step 5: Send the zipped package to AWS Lambda:
+      # - Specify the Lambda function to update and the name of the zip file containing the deployment package
       - name: Deploy to AWS Lambda
         run: |
           aws lambda update-function-code \
             --function-name $LAMBDA_FUNCTION_NAME \
-            --zip-file fileb://$ZIP_FILE
+            --zip-file fileb://$ZIP_FILE_NAME
