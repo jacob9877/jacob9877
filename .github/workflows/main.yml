@@ -37,7 +37,7 @@ jobs:
           mkdir -p package
           pip install --upgrade pip
           pip install -r requirements.txt --target package/
-          cp app.py package/
+          cp -r app package/
           cd package
           zip -r ../$ZIP_FILE_NAME .
 
