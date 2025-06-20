@@ -1,7 +1,10 @@
+from logging import getLogger
+
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 from mangum import Mangum
 
+logger = getLogger(__name__)
 load_dotenv(find_dotenv())
 
 app = FastAPI()
