@@ -7,34 +7,38 @@ on:
 
 jobs:
   deploy:
-    name: Build Layer and Deploy Function
+    name: Deploy FastAPI to AWS Lambda
     runs-on: ubuntu-latest
 
     env:
-      LAMBDA_FUNCTION_NAME: AI-for-Bariatric-Surgery_API
-      LAYER_NAME: FastAPI-Dependencies
+      LAMBDA_FUNCTION_NAME: AI-for-Bariatric-Surgery_API # <- Change this
       ZIP_FILE: lambda_package.zip
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies for layer
+      - name: Create virtual environment
         run: |
-          mkdir -p python
-          pip install -r requirements.txt -t python/
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Zip dependencies as Lambda layer
-        run: zip -r layer.zip python
-
-      - name: Zip FastAPI application (code only)
-        run: zip $ZIP_FILE app.py
+      - name: Package application
+        run: |
+          mkdir -p package
+          pip install --upgrade pip
+          pip install -r requirements.txt --target package/
+          cp app.py package/
+          cd package
+          zip -r ../$ZIP_FILE .
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -43,27 +47,8 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Publish Lambda layer version
-        run: |
-          aws lambda publish-layer-version \
-            --layer-name $LAYER_NAME \
-            --zip-file fileb://layer.zip \
-            --compatible-runtimes python3.11 \
-            --output json > layer_output.json
-
-      - name: Extract Layer ARN
-        id: extract-layer
-        run: |
-          echo "LAYER_ARN=$(jq -r .LayerVersionArn layer_output.json)" >> $GITHUB_ENV
-
-      - name: Deploy Lambda function code
+      - name: Deploy to AWS Lambda
         run: |
           aws lambda update-function-code \
             --function-name $LAMBDA_FUNCTION_NAME \
             --zip-file fileb://$ZIP_FILE
-
-      - name: Attach new layer version to function
-        run: |
-          aws lambda update-function-configuration \
-            --function-name $LAMBDA_FUNCTION_NAME \
-            --layers ${{ env.LAYER_ARN }}
