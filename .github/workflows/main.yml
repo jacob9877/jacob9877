@@ -34,8 +34,9 @@ jobs:
       - name: Package application
         run: |
           mkdir -p package
+          pip install --upgrade pip
+          pip install -r requirements.txt --target package/
           cp app.py package/
-          cp -r venv/lib/python3.11/site-packages/* package/
           cd package
           zip -r ../$ZIP_FILE .
 
