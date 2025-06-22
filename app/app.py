@@ -1,5 +1,5 @@
 import json
-from logging import getLogger
+import logging
 
 import boto3
 from dotenv import find_dotenv, load_dotenv
@@ -7,7 +7,8 @@ from fastapi import FastAPI
 from mangum import Mangum
 from pydantic import BaseModel
 
-logger = getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 load_dotenv(find_dotenv(), override=True)
 
 app = FastAPI()
@@ -31,17 +32,21 @@ class BreastCancerPrediction(BaseModel):
     response_description="Predict on an instance of breast cancer data",
 )
 def test2(data: BreastCancerPrediction):
+    logger.info("Initiializing SageMaker client")
     client = boto3.client("sagemaker-runtime")
+    logger.info("SageMaker client initialized")
 
     instance = list(data.model_dump().values())
 
     request = {"instances": {"features": instance}}
 
+    logger.info(f"Request to SageMaker: {request}")
     response = client.invoke_endpoint(
         EndpointName="breast-cancer-endpoint",
         Body=json.dumps(request),
         ContentType="application/json",
     )
+    logger.info("Response received from SageMaker")
 
     return json.loads(response["Body"].read().decode("utf-8"))
 
