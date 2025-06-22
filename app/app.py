@@ -35,9 +35,11 @@ def test2(data: BreastCancerPrediction):
 
     instance = list(data.model_dump().values())
 
+    request = {"instances": {"features": instance}}
+
     response = client.invoke_endpoint(
         EndpointName="breast-cancer-endpoint",
-        Body=json.dumps({"instances": [instance]}),
+        Body=json.dumps(request),
         ContentType="application/json",
     )
 
