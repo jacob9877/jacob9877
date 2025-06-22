@@ -38,7 +38,7 @@ def test2(data: BreastCancerPrediction):
 
     instance = list(data.model_dump().values())
 
-    request = {"instances": {"features": instance}}
+    request = {"instances": instance}
 
     logger.info(f"Request to SageMaker: {request}")
     response = client.invoke_endpoint(
