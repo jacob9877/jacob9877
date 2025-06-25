@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv(find_dotenv(), override=True)
 
-app = FastAPI(root_path="/<stage>")
+app = FastAPI(root_path="/beta")
 
 app.add_middleware(
     CORSMiddleware,
