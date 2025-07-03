@@ -9,7 +9,9 @@
 5. Install the dependencies by running the command `pip install -r requirements.txt` in the `api` directory.
 6. Make sure the `.env` file is present in the `api` directory. In its file content, it must include the following environment variables:
 
-- No environment variables required for now
+- AWS_ACCESS_KEY_ID=...
+- AWS_SECRET_ACCESS_KEY=...
+- AWS_DEFAULT_REGION=...
 
 ## Running the API
 
