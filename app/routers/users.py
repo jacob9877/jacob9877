@@ -5,9 +5,10 @@ import bcrypt
 import mysql.connector
 from fastapi import APIRouter, Depends, HTTPException
 from mysql.connector import MySQLConnection
+from mysql.connector.cursor import MySQLCursor
 from pydantic import BaseModel
 
-from app.utils.db import get_db_connection
+from app.utils.db import get_db_connection, user_exists
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -81,7 +82,7 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
                 detail="User with that email or username already exists",
             )
 
-        # Hashes the password
+        # Hashed the password
         hashed_pw = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
 
         # Inserts user into the database
@@ -105,3 +106,39 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
             cursor.close()
         if conn:
             conn.close()
+
+
+@router.get(
+    "/{user_id}/patients",
+    response_description="Get all patients for a user, sorted by most recently updated",
+)
+def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_connection)):
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        # Check if user exists
+        if not user_exists(cursor, user_id):
+            raise HTTPException(
+                status_code=404,
+                detail=f"User with ID {user_id} not found",
+            )
+
+        # Get all patients for the user, sorted by updated_at descending
+        cursor.execute(
+            """
+            SELECT * FROM breast_cancer_patients 
+            WHERE user_id = %s 
+            ORDER BY updated_at DESC
+            """,
+            (user_id,),
+        )
+
+        return cursor.fetchall()
+
+    except HTTPException as e:
+        raise e
+    except mysql.connector.Error as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="An internal error occurred.")

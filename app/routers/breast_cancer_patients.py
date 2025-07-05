@@ -9,7 +9,7 @@ from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 from pydantic import BaseModel, Field
 
-from app.utils.db import get_db_connection
+from app.utils.db import get_db_connection, user_exists
 
 router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patients"])
 
@@ -23,11 +23,6 @@ class AddPatientRequest(BaseModel):
     mean_perimeter: float = Field(gt=0)
     mean_area: float = Field(gt=0)
     mean_smoothness: float = Field(gt=0)
-
-
-def user_exists(cursor: MySQLCursor, user_id: int) -> bool:
-    cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-    return cursor.fetchone() is not None
 
 
 def get_prediction(instance: list[float]) -> int:
@@ -70,21 +65,28 @@ def insert_patient(
     response_description="Add a new breast cancer patient with prediction",
 )
 def add_patient(
-    add_patient: AddPatientRequest, conn: MySQLConnection = Depends(get_db_connection)
+    add_patient_request: AddPatientRequest,
+    conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
         cursor = conn.cursor(dictionary=True)
 
-        if not user_exists(cursor, add_patient.user_id):
+        # Check if user exists
+        cursor.execute(
+            "SELECT id FROM users WHERE id = %s", (add_patient_request.user_id,)
+        )
+        if not cursor.fetchone():
             raise HTTPException(
                 status_code=404,
-                detail=f"User with ID {add_patient.user_id} not found",
+                detail=f"User with ID {add_patient_request.user_id} not found",
             )
 
-        feature_values = list(add_patient.model_dump(exclude={"user_id"}).values())
+        feature_values = list(
+            add_patient_request.model_dump(exclude={"user_id"}).values()
+        )
         diagnosis = get_prediction(feature_values)
 
-        patient_id = insert_patient(cursor, add_patient, diagnosis)
+        patient_id = insert_patient(cursor, add_patient_request, diagnosis)
         conn.commit()
 
         cursor.execute(
