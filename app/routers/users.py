@@ -3,8 +3,11 @@ import traceback
 
 import bcrypt
 import mysql.connector
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from mysql.connector import MySQLConnection
 from pydantic import BaseModel
+
+from app.utils.db import get_db_connection
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -21,16 +24,8 @@ class RegisterRequest(BaseModel):
 
 
 @router.post("/login")
-def login(user: LoginRequest):
+def login(user: LoginRequest, conn: MySQLConnection = Depends(get_db_connection)):
     try:
-        # Connects to the database using environment variables
-        conn = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            port=int(os.getenv("DB_PORT")),
-            database=os.getenv("DB_NAME"),
-        )
         cursor = conn.cursor(dictionary=True)
 
         # Looks up user by email
@@ -71,16 +66,8 @@ def login(user: LoginRequest):
 
 
 @router.post("/register")
-def register(user: RegisterRequest):
+def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_connection)):
     try:
-        # Connects to the database
-        conn = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            port=int(os.getenv("DB_PORT")),
-            database=os.getenv("DB_NAME"),
-        )
         cursor = conn.cursor()
 
         # Checks if email or username already exists
