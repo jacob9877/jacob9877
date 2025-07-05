@@ -17,7 +17,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -27,7 +27,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPOSITORY_URI }}:latest
+          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_URI }}:latest
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
 
@@ -35,7 +35,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPOSITORY_URI }}:latest
+          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_URI }}:latest
           aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
             --image-uri $IMAGE_URI
