@@ -20,4 +20,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the AI for Bariatric Surgery API!"}
+
+
+@app.get("/crash")
+def crash():
+    raise RuntimeError("This is a test error")
+
+
 handler = Mangum(app)
