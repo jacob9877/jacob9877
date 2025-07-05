@@ -6,7 +6,7 @@ from mangum import Mangum
 from app.routers import breast_cancer_patients, users
 
 load_dotenv()
-app = FastAPI()
+app = FastAPI(root_path="/beta")
 
 # routers
 app.include_router(users.router)
