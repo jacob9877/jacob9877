@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
-from .routers import breast_cancer_patients, users
+from app.routers import breast_cancer_patients, users
 
 load_dotenv()
 app = FastAPI()
