@@ -3,56 +3,68 @@ name: Deploy FastAPI to AWS Lambda
 on:
   push:
     branches:
-      - main # This automation/workflow runs only when code is pushed to the 'main' branch
+      - main
 
 jobs:
   deploy:
-    name: Deploy FastAPI to AWS Lambda
-    runs-on: ubuntu-latest # The automation will run on the latest Ubuntu runner provided by GitHub
+    name: Deploy FastAPI with Layer to AWS Lambda
+    runs-on: ubuntu-latest
 
-    # Set required environment variables / constants for this job
     env:
       LAMBDA_FUNCTION_NAME: AI-for-Bariatric-Surgery_API
-      ZIP_FILE_NAME: lambda_package.zip
+      LAYER_NAME: API-Lambda-Layer
+      REGION: ${{ secrets.AWS_REGION }}
 
     steps:
-      # Step 1: Checkout the code from your GitHub repository
       - name: Checkout code
-        uses: actions/checkout@v3 # This action pulls your repository code into the workflow runner
+        uses: actions/checkout@v3
 
-      # Step 2: Set up Python 3.11 on the runner
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11" # Specifies the Python version to use
-          cache: "pip" # Caches pip dependencies (python package files) to speed up future runs
+          python-version: "3.11"
+          cache: "pip"
 
-      # Step 3: Package the application for AWS Lambda deployment:
-      # - Create a directory for the package
-      # - Install Python dependencies into that directory
-      # - Copy the main application file into the package directory
-      # - Zip the package directory into a file for deployment
-      - name: Package application
+      - name: Package Lambda Layer (dependencies)
         run: |
-          mkdir -p package
+          mkdir -p layer/python
           pip install --upgrade pip
-          pip install -r requirements.txt --target package/
-          cp -r app package/
-          cd package
-          zip -r ../$ZIP_FILE_NAME .
+          pip install -r requirements.txt --target layer/python
+          cd layer
+          zip -r ../layer.zip .
 
-      # Step 4: Configure AWS credentials so the workflow can interact with AWS services
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }} # AWS access key stored securely in GitHub Secrets
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # AWS secret key stored securely in GitHub Secrets
-          aws-region: ${{ secrets.AWS_REGION }} # AWS region where the Lambda function is deployed, also stored in GitHub Secrets
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      # Step 5: Send the zipped package to AWS Lambda:
-      # - Specify the Lambda function to update and the name of the zip file containing the deployment package
-      - name: Deploy to AWS Lambda
+      - name: Publish Lambda Layer
+        id: publish_layer
+        run: |
+          LAYER_VERSION=$(aws lambda publish-layer-version \
+            --layer-name $LAYER_NAME \
+            --zip-file fileb://layer.zip \
+            --compatible-runtimes python3.11 \
+            --query 'Version' --output text)
+          echo "LAYER_VERSION=$LAYER_VERSION" >> $GITHUB_ENV
+
+      - name: Package application code only
+        run: |
+          mkdir -p app_package
+          cp -r app app_package/
+          cd app_package
+          zip -r ../app_package.zip .
+
+      - name: Deploy application code to Lambda
         run: |
           aws lambda update-function-code \
             --function-name $LAMBDA_FUNCTION_NAME \
-            --zip-file fileb://$ZIP_FILE_NAME
+            --zip-file fileb://app_package.zip
+
+      - name: Attach layer to Lambda
+        run: |
+          aws lambda update-function-configuration \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --layers arn:aws:lambda:${{ env.REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:layer:${{ env.LAYER_NAME }}:${{ env.LAYER_VERSION }}
