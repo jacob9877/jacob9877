@@ -27,7 +27,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_URI }}:latest
+          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_NAME }}:latest
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
 
@@ -35,7 +35,7 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_URI }}:latest
+          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_NAME }}:latest
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
             --image-uri $IMAGE_URI
