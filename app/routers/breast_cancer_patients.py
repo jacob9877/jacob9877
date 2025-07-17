@@ -1,10 +1,9 @@
 import json
 import traceback
 from typing import List, Optional
-from fastapi import Path
 
 import boto3
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Path, Depends, File, Form, HTTPException, UploadFile, Body
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
@@ -87,6 +86,9 @@ def add_patients_csv(
             return cursor.fetchall()
         else:
             return {"message": "No patients added."}
+    
+    except HTTPException as e:
+        raise e
 
     except Exception as e:
         traceback.print_exc()
@@ -127,6 +129,9 @@ def add_patients_json(
             cursor.execute(query, inserted_ids * 2)
             return cursor.fetchall()
         return {"message": "No patients added."}
+    
+    except HTTPException as e:
+        raise e
 
     except Exception as e:
         traceback.print_exc()
@@ -135,4 +140,113 @@ def add_patients_json(
         cursor.close()
         conn.close()
 
+@router.put("/{patient_id}", summary="Update patient data")
+def update_patient(
+    patient_id: int = Path(..., description="ID of the patient to update"),
+    updated_data: AddPatient = ...,  # user_id is not editable
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    try:
+        cursor = conn.cursor(dictionary=True)
 
+        # Check if patient exists
+        cursor.execute(
+            "SELECT * FROM breast_cancer_patients WHERE id = %s", (patient_id,)
+        )
+        patient = cursor.fetchone()
+        if not patient:
+            raise HTTPException(
+                status_code=404, detail=f"Patient ID {patient_id} not found"
+            )
+
+        # Update the patient
+        cursor.execute(
+            """
+            UPDATE breast_cancer_patients SET
+                mean_radius=%s, mean_texture=%s, mean_perimeter=%s,
+                mean_area=%s, mean_smoothness=%s, updated_at=NOW()
+            WHERE id=%s
+            """,
+            (
+                updated_data.mean_radius,
+                updated_data.mean_texture,
+                updated_data.mean_perimeter,
+                updated_data.mean_area,
+                updated_data.mean_smoothness,
+                patient_id,
+            ),
+        )
+        conn.commit()
+
+        # Return the updated row
+        cursor.execute(
+            "SELECT * FROM breast_cancer_patients WHERE id = %s", (patient_id,)
+        )
+        return cursor.fetchone()
+    
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, detail="Server error while updating patient"
+        )
+
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@router.delete("/batch-delete", summary="Delete multiple patients by ID")
+def delete_patients(
+    patient_ids: List[int] = Body(..., embed=True, description="List of patient IDs to delete"),
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    try:
+        if len(patient_ids) == 0:
+            raise HTTPException(status_code=400, detail="No patient IDs provided")
+
+        cursor = conn.cursor(dictionary=True)
+
+        # Check if all patient IDs exist
+        format_ids = ",".join(["%s"] * len(patient_ids))
+        cursor.execute(
+            f"SELECT id FROM breast_cancer_patients WHERE id IN ({format_ids})",
+            tuple(patient_ids),
+        )
+        found_ids = [row["id"] for row in cursor.fetchall()]
+
+        missing_ids = list(set(patient_ids) - set(found_ids))
+        if missing_ids:
+            raise HTTPException(
+                status_code=404, detail=f"Patient IDs not found: {missing_ids}"
+            )
+
+        # Delete patients
+        cursor.execute(
+            f"DELETE FROM breast_cancer_patients WHERE id IN ({format_ids})",
+            tuple(patient_ids),
+        )
+        conn.commit()
+
+        return {
+            "message": f"Deleted {len(patient_ids)} patients successfully",
+            "deleted_ids": patient_ids,
+        }
+
+    except HTTPException as e:
+        raise e
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500, detail="Server error while deleting patients"
+        )
+
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
