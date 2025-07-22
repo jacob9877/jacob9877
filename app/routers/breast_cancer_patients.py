@@ -3,11 +3,20 @@ import traceback
 from typing import List, Optional
 
 import boto3
-from fastapi import APIRouter, Path, Depends, File, Form, HTTPException, UploadFile, Body
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    UploadFile,
+)
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
-from app.models.patient_models import AddPatientRequest, AddPatientPayload, AddPatient
+from app.models.patient_models import AddPatient, AddPatientPayload, AddPatientRequest
 from app.utils.db import get_db_connection, user_exists
 from app.utils.file_parser import parse_csv
 
@@ -15,16 +24,21 @@ router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patien
 
 ENDPOINT_NAME = "breast-cancer-endpoint"
 
-def get_prediction(instance: list[float]) -> int:
+
+def get_predictions(instances: list[list[float]]) -> list[int]:
     sagemaker_client = boto3.client("sagemaker-runtime")
     response = sagemaker_client.invoke_endpoint(
         EndpointName=ENDPOINT_NAME,
         ContentType="application/json",
-        Body=json.dumps({"instances": [instance]}),
+        Body=json.dumps({"instances": instances}),
     )
-    result = response["Body"].read().decode("utf-8")
-    prediction = json.loads(result)["predictions"][0][0]
-    return round(prediction)  # Apply the threshold of 0.5 to classify as 0 or 1
+    result_raw = response["Body"].read().decode("utf-8")
+    result = json.loads(result_raw)
+    predictions = [
+        prediction[0] if isinstance(prediction, list) else prediction
+        for prediction in result["predictions"]
+    ]
+    return predictions
 
 
 def insert_patient(
@@ -49,28 +63,42 @@ def insert_patient(
     )
     return cursor.lastrowid
 
+
 @router.post("/add-patients-csv", summary="Add multiple patients via CSV upload")
 def add_patients_csv(
     user_id: int = Form(...),
-    file: Optional[UploadFile] = File(None),    
+    file: Optional[UploadFile] = File(None),
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
         cursor = conn.cursor(dictionary=True)
 
         if not user_exists(cursor, user_id):
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"User with ID {user_id} not found"
+            )
 
         file.file.seek(0)
         content = file.file.read().decode("utf-8")
         parsed_patients = parse_csv(content, user_id)
         print(f"Parsed {len(parsed_patients)} patients from CSV.")
 
-
-        inserted_ids = []
+        instances = []
         for patient in parsed_patients:
             features = list(patient.model_dump(exclude={"user_id"}).values())
-            diagnosis = get_prediction(features)
+            instances.append(features)
+
+        predictions = get_predictions(instances)
+
+        if len(predictions) != len(parsed_patients):
+            raise ValueError(
+                "Mismatch between number of patients and predictions",
+            )
+
+        inserted_ids = []
+
+        for patient, diagnosis in zip(parsed_patients, predictions):
+            features = list(patient.model_dump(exclude={"user_id"}).values())
             pid = insert_patient(cursor, patient, diagnosis)
             inserted_ids.append(pid)
 
@@ -86,7 +114,7 @@ def add_patients_csv(
             return cursor.fetchall()
         else:
             return {"message": "No patients added."}
-    
+
     except HTTPException as e:
         raise e
 
@@ -108,13 +136,29 @@ def add_patients_json(
     cursor = conn.cursor(dictionary=True)
     try:
         if not user_exists(cursor, payload.user_id):
-            raise HTTPException(status_code=404, detail=f"User with ID {payload.user_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"User with ID {payload.user_id} not found"
+            )
+
+        instances = []
+        parsed_patients = []
+        for patient_data in payload.patients:
+            patient = AddPatientRequest(
+                user_id=payload.user_id, **patient_data.model_dump()
+            )
+            features = list(patient.model_dump(exclude={"user_id"}).values())
+            instances.append(features)
+            parsed_patients.append(patient)
+
+        predictions = get_predictions(instances)
+        if len(predictions) != len(parsed_patients):
+            raise ValueError(
+                "Mismatch between number of patients and predictions",
+            )
 
         inserted_ids = []
-        for patient_data in payload.patients:
-            patient = AddPatientRequest(user_id=payload.user_id, **patient_data.dict())
+        for patient, diagnosis in zip(parsed_patients, predictions):
             features = list(patient.model_dump(exclude={"user_id"}).values())
-            diagnosis = get_prediction(features)
             pid = insert_patient(cursor, patient, diagnosis)
             inserted_ids.append(pid)
 
@@ -129,7 +173,7 @@ def add_patients_json(
             cursor.execute(query, inserted_ids * 2)
             return cursor.fetchall()
         return {"message": "No patients added."}
-    
+
     except HTTPException as e:
         raise e
 
@@ -139,6 +183,7 @@ def add_patients_json(
     finally:
         cursor.close()
         conn.close()
+
 
 @router.put("/{patient_id}", summary="Update patient data")
 def update_patient(
@@ -183,7 +228,7 @@ def update_patient(
             "SELECT * FROM breast_cancer_patients WHERE id = %s", (patient_id,)
         )
         return cursor.fetchone()
-    
+
     except HTTPException as e:
         raise e
 
@@ -200,7 +245,9 @@ def update_patient(
 
 @router.delete("/batch-delete", summary="Delete multiple patients by ID")
 def delete_patients(
-    patient_ids: List[int] = Body(..., embed=True, description="List of patient IDs to delete"),
+    patient_ids: List[int] = Body(
+        ..., embed=True, description="List of patient IDs to delete"
+    ),
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
