@@ -2,6 +2,8 @@ import os
 import traceback
 
 import bcrypt
+import secrets
+import smtplib
 import mysql.connector
 from fastapi import APIRouter, Depends, HTTPException
 from mysql.connector import MySQLConnection
@@ -23,6 +25,10 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
 
+class PasswordResetRequest(BaseModel):
+    email: str
+    new_password: str
+    token: str
 
 @router.post("/login")
 def login(user: LoginRequest, conn: MySQLConnection = Depends(get_db_connection)):
@@ -142,3 +148,35 @@ def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_conne
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="An internal error occurred.")
+
+@router.post("/reset-password", response_description="Reset password for a user")
+def reset_password(
+    user: PasswordResetRequest, conn: MySQLConnection = Depends(get_db_connection)
+):  
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id FROM users WHERE email = %s", (user.email,))
+        user_data = cursor.fetchone()
+
+        if not user_data:
+            raise HTTPException(status_code=404, detail="Account with that email does not exist")
+        
+        # user.token = secrets.token_urlsafe(16)
+        hashed_pw = bcrypt.hashpw()(user.new_password.encode(), bcrypt.gensalt()).decode()
+
+        cursor.execute(
+            """
+            UPDATE users 
+            SET password_hash = %s 
+            WHERE email = %s
+            """,
+            (hashed_pw, user.email),
+        )
+        conn.commit()
+        return {"message": "Password has been changed successfully"}
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+        
