@@ -1,70 +1,126 @@
 import os
+import secrets
+import smtplib
 import traceback
 
 import bcrypt
-import secrets
-import smtplib
 import mysql.connector
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
+from app.models.breast_cancer_patient_models import BreastCancerPatient
+from app.models.common_models import ResponseModel
 from app.utils.db import get_db_connection, user_exists
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: EmailStr = Field(
+        ..., description="User's email address", example="user@example.com"
+    )
+    password: str = Field(..., description="User's password", example="password123")
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    email: str
-    password: str
+    username: str = Field(..., description="User's username", example="johndoe")
+    email: EmailStr = Field(
+        ..., description="User's email address", example="johndoe@gmail.com"
+    )
+    password: str = Field(..., description="User's password", example="password123")
+
+
+class UserResponse(BaseModel):
+    id: int = Field(..., description="User ID", example=1)
+    username: str = Field(..., description="User's username", example="johndoe")
+    email: EmailStr = Field(
+        ..., description="User's email address", example="johndoe@gmail.com"
+    )
+
 
 class PasswordResetRequest(BaseModel):
     email: str
     new_password: str
     token: str
 
-@router.post("/login")
-def login(user: LoginRequest, conn: MySQLConnection = Depends(get_db_connection)):
+
+@router.post(
+    "/login",
+    summary="Log a user in",
+    description="Logs a user in by verifying their email and password. Returns user details if successful.",
+    response_model=ResponseModel[UserResponse],
+    response_description="Returns user details",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Provided password is incorrect",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "No user exists with provided email",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def login(
+    login_request: LoginRequest, conn: MySQLConnection = Depends(get_db_connection)
+):
     try:
         cursor = conn.cursor(dictionary=True)
 
         # Looks up user by email
         cursor.execute(
             "SELECT id, username, password_hash FROM users WHERE email = %s",
-            (user.email,),
+            (login_request.email,),
         )
-        user_data = cursor.fetchone()
+        user = cursor.fetchone()
 
         # Checks if the user exists
-        if not user_data:
-            raise HTTPException(status_code=404, detail="User not found")
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
         # Checks password
         if not bcrypt.checkpw(
-            user.password.encode(), user_data["password_hash"].encode()
+            login_request.password.encode(), user["password_hash"].encode()
         ):
-            raise HTTPException(status_code=401, detail="Incorrect password")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password"
+            )
 
-        return {
-            "message": "Login successful",
-            "user": {
-                "id": user_data["id"],
-                "username": user_data["username"],
-                "email": user.email,
-            },
-        }
+        return ResponseModel[UserResponse](
+            data=UserResponse(
+                id=user["id"],
+                username=user["username"],
+                email=login_request.email,
+            ),
+            detail="Login successful",
+        )
 
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
     except mysql.connector.Error as db_error:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(db_error)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
     finally:
         if cursor:
             cursor.close()
@@ -72,41 +128,92 @@ def login(user: LoginRequest, conn: MySQLConnection = Depends(get_db_connection)
             conn.close()
 
 
-@router.post("/register")
+@router.post(
+    "/register",
+    summary="Register a new user",
+    description="Creates a new user account with a unique email and username. Returns the created user's details upon success.",
+    response_model=ResponseModel[UserResponse],
+    response_description="Returns the newly created user's details",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "User with the provided email or username already exists",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
 def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_connection)):
     try:
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
 
-        # Checks if email or username already exists
+        # Check if user exists with provided username
         cursor.execute(
-            "SELECT id FROM users WHERE email = %s OR username = %s",
-            (user.email, user.username),
+            "SELECT id FROM users WHERE username = %s",
+            (user.username,),
         )
         if cursor.fetchone():
             raise HTTPException(
-                status_code=400,
-                detail="User with that email or username already exists",
+                status_code=status.HTTP_409_CONFLICT, detail="Username is taken"
             )
 
-        # Hashed the password
+        # Check if user exists with provided email
+        cursor.execute(
+            "SELECT id FROM users WHERE email = %s",
+            (user.email,),
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="Email is taken"
+            )
+
+        # Hash password
         hashed_pw = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
 
-        # Inserts user into the database
+        # Insert user into database
         cursor.execute(
             """
             INSERT INTO users (username, email, password_hash)
             VALUES (%s, %s, %s)
             """,
-            (user.username, user.email, hashed_pw),
+            (
+                user.username,
+                user.email,
+                hashed_pw,
+            ),
         )
         conn.commit()
-        return {"message": "User registered successfully"}
 
-    except mysql.connector.IntegrityError:
-        raise HTTPException(status_code=400, detail="User already exists")
+        user_id = cursor.lastrowid
+
+        return ResponseModel[UserResponse](
+            data=UserResponse(
+                id=user_id,
+                username=user.username,
+                email=user.email,
+            ),
+            detail="User registered successfully",
+        )
+
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except mysql.connector.Error as db_error:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+        )
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
     finally:
         if cursor:
             cursor.close()
@@ -116,7 +223,21 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
 
 @router.get(
     "/{user_id}/patients",
-    response_description="Get all patients for a user, sorted by most recently updated",
+    summary="Get all patients for a user",
+    description="Retrieves all breast cancer patients associated with a specific user, sorted by the most recently updated",
+    response_model=ResponseModel[list[BreastCancerPatient]],
+    response_description="Returns all patients for a user, sorted by most recently updated",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "User with the provided ID does not exist",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
 )
 def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_connection)):
     try:
@@ -125,7 +246,7 @@ def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_conne
         # Check if user exists
         if not user_exists(cursor, user_id):
             raise HTTPException(
-                status_code=404,
+                status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User with ID {user_id} not found",
             )
 
@@ -139,20 +260,37 @@ def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_conne
             (user_id,),
         )
 
-        return cursor.fetchall()
+        return ResponseModel[list[BreastCancerPatient]](
+            data=cursor.fetchall(), detail="Patients retrieved successfully"
+        )
 
-    except HTTPException as e:
-        raise e
-    except mysql.connector.Error as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except mysql.connector.Error as db_error:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+        )
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail="An internal error occurred.")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
 
 @router.post("/reset-password", response_description="Reset password for a user")
 def reset_password(
     user: PasswordResetRequest, conn: MySQLConnection = Depends(get_db_connection)
-):  
+):
     try:
         cursor = conn.cursor()
 
@@ -160,10 +298,14 @@ def reset_password(
         user_data = cursor.fetchone()
 
         if not user_data:
-            raise HTTPException(status_code=404, detail="Account with that email does not exist")
-        
+            raise HTTPException(
+                status_code=404, detail="Account with that email does not exist"
+            )
+
         # user.token = secrets.token_urlsafe(16)
-        hashed_pw = bcrypt.hashpw()(user.new_password.encode(), bcrypt.gensalt()).decode()
+        hashed_pw = bcrypt.hashpw()(
+            user.new_password.encode(), bcrypt.gensalt()
+        ).decode()
 
         cursor.execute(
             """
@@ -179,4 +321,3 @@ def reset_password(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-        

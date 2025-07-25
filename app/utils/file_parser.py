@@ -1,15 +1,17 @@
 import csv
 import io
-from app.models.patient_models import AddPatientRequest
-from fastapi import HTTPException
 
-def parse_csv(content: str, user_id: int) -> list[AddPatientRequest]:
-    patients =[]
+from fastapi import HTTPException, status
+
+from app.models.breast_cancer_patient_models import BreastCancerPatientFeatures
+
+
+def parse_csv(content: str) -> list[BreastCancerPatientFeatures]:
+    patients = []
     csv_reader = csv.DictReader(io.StringIO(content))
     for row in csv_reader:
         try:
-            patient = AddPatientRequest(
-                user_id=user_id,
+            patient = BreastCancerPatientFeatures(
                 mean_radius=float(row["mean_radius"]),
                 mean_texture=float(row["mean_texture"]),
                 mean_perimeter=float(row["mean_perimeter"]),
@@ -20,7 +22,9 @@ def parse_csv(content: str, user_id: int) -> list[AddPatientRequest]:
         except (ValueError, KeyError) as e:
             print("Error row:", row)
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid CSV format or missing fields",
             )
+    return patients
+    return patients
     return patients

@@ -1,8 +1,9 @@
 import json
 import traceback
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import boto3
+import mysql.connector
 from fastapi import (
     APIRouter,
     Body,
@@ -12,11 +13,18 @@ from fastapi import (
     HTTPException,
     Path,
     UploadFile,
+    status,
 )
+from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
-from app.models.patient_models import AddPatient, AddPatientPayload, AddPatientRequest
+from app.models.breast_cancer_patient_models import (
+    AddBreastCancerPatientsRequest,
+    BreastCancerPatient,
+    BreastCancerPatientFeatures,
+)
+from app.models.common_models import ResponseModel
 from app.utils.db import get_db_connection, user_exists
 from app.utils.file_parser import parse_csv
 
@@ -25,7 +33,7 @@ router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patien
 ENDPOINT_NAME = "breast-cancer-endpoint"
 
 
-def get_predictions(instances: list[list[float]]) -> list[int]:
+def get_predictions(instances: list[list[float]]) -> list[Literal[0, 1]]:
     sagemaker_client = boto3.client("sagemaker-runtime")
     response = sagemaker_client.invoke_endpoint(
         EndpointName=ENDPOINT_NAME,
@@ -41,8 +49,12 @@ def get_predictions(instances: list[list[float]]) -> list[int]:
     return predictions
 
 
+# We went with a inserting a single patient at a time because cursor.execute() returns the newly created ID whereas cursor.executemany() does not
 def insert_patient(
-    cursor: MySQLCursor, request: AddPatientRequest, diagnosis: int
+    cursor: MySQLCursor,
+    user_id: int,
+    patient: BreastCancerPatientFeatures,
+    diagnosis: Literal[0, 1],
 ) -> int:
     cursor.execute(
         """
@@ -52,19 +64,128 @@ def insert_patient(
         ) VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            request.user_id,
-            request.mean_radius,
-            request.mean_texture,
-            request.mean_perimeter,
-            request.mean_area,
-            request.mean_smoothness,
+            user_id,
+            patient.mean_radius,
+            patient.mean_texture,
+            patient.mean_perimeter,
+            patient.mean_area,
+            patient.mean_smoothness,
             diagnosis,
         ),
     )
     return cursor.lastrowid
 
 
-@router.post("/add-patients-csv", summary="Add multiple patients via CSV upload")
+def add_patients(
+    cursor: MySQLCursor,
+    add_patients_request: AddBreastCancerPatientsRequest,
+) -> List[str]:
+    instances = [
+        list(patient.model_dump(exclude={"user_id"}).values())
+        for patient in add_patients_request.patients
+    ]
+    diagnoses = get_predictions(instances)
+
+    assert len(diagnoses) == len(
+        add_patients_request.patients
+    ), "Mismatch between number of patients and diagnoses"
+
+    inserted_ids = []
+    for patient, diagnosis in zip(add_patients_request.patients, diagnoses):
+        pid = insert_patient(cursor, add_patients_request.user_id, patient, diagnosis)
+        inserted_ids.append(pid)
+
+    return inserted_ids
+
+
+@router.post(
+    "/add-patients",
+    summary="Add multiple breast cancer patients",
+    description="Add multiple breast cancer patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
+    response_model=List[BreastCancerPatient],
+    response_description="Returns the newly created breast cancer patients",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "CSV is invalid",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "User not found",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def add_patients_json(
+    add_patients_request: AddBreastCancerPatientsRequest,
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    cursor = conn.cursor(dictionary=True)
+    try:
+        if not user_exists(cursor, add_patients_request.user_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {add_patients_request.user_id} not found",
+            )
+
+        inserted_ids = add_patients(cursor, add_patients_request)
+        conn.commit()
+
+        query = f"""
+            SELECT * FROM breast_cancer_patients
+            WHERE id IN ({','.join(['%s'] * len(inserted_ids))})
+            ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
+        """
+        cursor.execute(query, inserted_ids * 2)
+        return cursor.fetchall()
+
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except mysql.connector.Error as db_error:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@router.post(
+    "/add-patients/csv",
+    summary="Add multiple breast cancer patients via CSV upload",
+    description="Add multiple breast cancer patients with their features and user ID",
+    response_model=List[BreastCancerPatient],
+    response_description="Returns the newly created breast cancer patients",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "CSV is invalid",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "User not found",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
 def add_patients_csv(
     user_id: int = Form(...),
     file: Optional[UploadFile] = File(None),
@@ -75,52 +196,47 @@ def add_patients_csv(
 
         if not user_exists(cursor, user_id):
             raise HTTPException(
-                status_code=404, detail=f"User with ID {user_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found",
             )
 
         file.file.seek(0)
         content = file.file.read().decode("utf-8")
-        parsed_patients = parse_csv(content, user_id)
+        parsed_patients = parse_csv(content)
         print(f"Parsed {len(parsed_patients)} patients from CSV.")
 
-        instances = []
-        for patient in parsed_patients:
-            features = list(patient.model_dump(exclude={"user_id"}).values())
-            instances.append(features)
+        # Load into request class to validate there's at least 1 patient
+        add_patients_request = AddBreastCancerPatientsRequest(
+            user_id=user_id, patients=parsed_patients
+        )
 
-        predictions = get_predictions(instances)
-
-        if len(predictions) != len(parsed_patients):
-            raise ValueError(
-                "Mismatch between number of patients and predictions",
-            )
-
-        inserted_ids = []
-
-        for patient, diagnosis in zip(parsed_patients, predictions):
-            features = list(patient.model_dump(exclude={"user_id"}).values())
-            pid = insert_patient(cursor, patient, diagnosis)
-            inserted_ids.append(pid)
-
+        inserted_ids = add_patients(cursor, add_patients_request)
         conn.commit()
 
-        if inserted_ids:
-            query = f"""
-                SELECT * FROM breast_cancer_patients
-                WHERE id IN ({','.join(['%s'] * len(inserted_ids))})
-                ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
-            """
-            cursor.execute(query, inserted_ids * 2)
-            return cursor.fetchall()
-        else:
-            return {"message": "No patients added."}
+        query = f"""
+            SELECT * FROM breast_cancer_patients
+            WHERE id IN ({','.join(['%s'] * len(inserted_ids))})
+            ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
+        """
+        cursor.execute(query, inserted_ids * 2)
+        return cursor.fetchall()
 
-    except HTTPException as e:
-        raise e
-
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except mysql.connector.Error as db_error:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+        )
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Failed to process CSV.")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
     finally:
         if cursor:
             cursor.close()
@@ -128,67 +244,10 @@ def add_patients_csv(
             conn.close()
 
 
-@router.post("/add-patients-json", summary="Add multiple patients via JSON body")
-def add_patients_json(
-    payload: AddPatientPayload,
-    conn: MySQLConnection = Depends(get_db_connection),
-):
-    cursor = conn.cursor(dictionary=True)
-    try:
-        if not user_exists(cursor, payload.user_id):
-            raise HTTPException(
-                status_code=404, detail=f"User with ID {payload.user_id} not found"
-            )
-
-        instances = []
-        parsed_patients = []
-        for patient_data in payload.patients:
-            patient = AddPatientRequest(
-                user_id=payload.user_id, **patient_data.model_dump()
-            )
-            features = list(patient.model_dump(exclude={"user_id"}).values())
-            instances.append(features)
-            parsed_patients.append(patient)
-
-        predictions = get_predictions(instances)
-        if len(predictions) != len(parsed_patients):
-            raise ValueError(
-                "Mismatch between number of patients and predictions",
-            )
-
-        inserted_ids = []
-        for patient, diagnosis in zip(parsed_patients, predictions):
-            features = list(patient.model_dump(exclude={"user_id"}).values())
-            pid = insert_patient(cursor, patient, diagnosis)
-            inserted_ids.append(pid)
-
-        conn.commit()
-
-        if inserted_ids:
-            query = f"""
-                SELECT * FROM breast_cancer_patients
-                WHERE id IN ({','.join(['%s'] * len(inserted_ids))})
-                ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
-            """
-            cursor.execute(query, inserted_ids * 2)
-            return cursor.fetchall()
-        return {"message": "No patients added."}
-
-    except HTTPException as e:
-        raise e
-
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Failed to process JSON.")
-    finally:
-        cursor.close()
-        conn.close()
-
-
 @router.put("/{patient_id}", summary="Update patient data")
 def update_patient(
     patient_id: int = Path(..., description="ID of the patient to update"),
-    updated_data: AddPatient = ...,  # user_id is not editable
+    updated_data: BreastCancerPatientFeatures = ...,  # user_id is not editable
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
