@@ -26,5 +26,3 @@ def parse_csv(content: str) -> list[BreastCancerPatientFeatures]:
                 detail="Invalid CSV format or missing fields",
             )
     return patients
-    return patients
-    return patients
