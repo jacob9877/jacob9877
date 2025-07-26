@@ -1,6 +1,6 @@
 import json
 import traceback
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 import boto3
 import mysql.connector
@@ -102,7 +102,7 @@ def add_patients(
     "/add-patients",
     summary="Add multiple breast cancer patients",
     description="Add multiple breast cancer patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
-    response_model=List[BreastCancerPatient],
+    response_model=ResponseModel[list[BreastCancerPatient]],
     response_description="Returns the newly created breast cancer patients",
     status_code=status.HTTP_201_CREATED,
     responses={
@@ -141,7 +141,11 @@ def add_patients_json(
             ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
         """
         cursor.execute(query, inserted_ids * 2)
-        return cursor.fetchall()
+        rows = cursor.fetchall()
+        inserted_patients = [BreastCancerPatient(**row) for row in rows]
+        return ResponseModel[list[BreastCancerPatient]](
+            data=inserted_patients, detail="Patients added successfully"
+        )
 
     except HTTPException as http_error:
         return JSONResponse(
@@ -168,7 +172,7 @@ def add_patients_json(
     "/add-patients/csv",
     summary="Add multiple breast cancer patients via CSV upload",
     description="Add multiple breast cancer patients with their features and user ID",
-    response_model=List[BreastCancerPatient],
+    response_model=ResponseModel[list[BreastCancerPatient]],
     response_description="Returns the newly created breast cancer patients",
     status_code=status.HTTP_201_CREATED,
     responses={
@@ -219,7 +223,11 @@ def add_patients_csv(
             ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
         """
         cursor.execute(query, inserted_ids * 2)
-        return cursor.fetchall()
+        rows = cursor.fetchall()
+        inserted_patients = [BreastCancerPatient(**row) for row in rows]
+        return ResponseModel[list[BreastCancerPatient]](
+            data=inserted_patients, detail="Patients added successfully"
+        )
 
     except HTTPException as http_error:
         return JSONResponse(
