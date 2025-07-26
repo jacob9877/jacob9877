@@ -1,6 +1,5 @@
 import os
 
-import google.generativeai as genai
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,8 +8,6 @@ from mangum import Mangum
 from app.routers import breast_cancer_patients, chat, conversations, users
 
 load_dotenv(find_dotenv(), override=True)
-
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 app = FastAPI(root_path="/beta")  # root_path must match the API Gateway stage name
 

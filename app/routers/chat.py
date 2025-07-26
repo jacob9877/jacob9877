@@ -10,6 +10,7 @@ from mysql.connector.cursor import MySQLCursor
 from app.models.chat_models import (
     ChatRequest,
     ChatResponse,
+    Message,
     StartConversationRequest,
     StartConversationResponse,
 )
@@ -106,7 +107,9 @@ def start_conversation(
             conn.close()
 
 
-def get_conversation_history(cursor: MySQLCursor, conversation_id: int) -> list[dict]:
+def get_conversation_history(
+    cursor: MySQLCursor, conversation_id: int
+) -> list[Message]:
     cursor.execute(
         """
         SELECT role, content FROM messages
@@ -117,7 +120,7 @@ def get_conversation_history(cursor: MySQLCursor, conversation_id: int) -> list[
     rows = cursor.fetchall()
 
     # Format for Gemini API
-    return [{"role": row["role"], "parts": [row["content"]]} for row in rows]
+    return [Message(**row) for row in rows]
 
 
 def insert_message(cursor: MySQLCursor, conversation_id: int, role: str, content: str):
@@ -171,7 +174,6 @@ def chat(request: ChatRequest, conn: MySQLConnection = Depends(get_db_connection
         insert_message(cursor, request.conversation_id, "user", request.user_message)
 
         history = get_conversation_history(cursor, request.conversation_id)
-        history.append({"role": "user", "parts": [request.user_message]})
 
         assistant_reply = get_gemini_response(history)
 

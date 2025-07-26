@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -37,3 +39,8 @@ class ChatResponse(BaseModel):
         description="AI's reply to the message",
         example="As requested, here are some common struggles...",
     )
+
+
+class Message(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
