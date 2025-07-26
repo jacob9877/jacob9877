@@ -1,4 +1,5 @@
 import json
+import os
 import traceback
 from typing import Literal, Optional
 
@@ -18,11 +19,13 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
+from pydantic import BaseModel
 
 from app.models.breast_cancer_patient_models import (
     AddBreastCancerPatientsRequest,
     BreastCancerPatient,
     BreastCancerPatientFeatures,
+    Explanation,
 )
 from app.models.common_models import ResponseModel
 from app.utils.db import get_db_connection, user_exists
@@ -31,6 +34,7 @@ from app.utils.file_parser import parse_csv
 router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patients"])
 
 SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
+EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
 
 
 def get_predictions(instances: list[list[float]]) -> list[Literal[0, 1]]:
@@ -166,7 +170,6 @@ def add_patients_json(
         )
     finally:
         cursor.close()
-        conn.close()
 
 
 @router.post(
@@ -249,8 +252,6 @@ def add_patients_csv(
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
 
 
 @router.put("/{patient_id}", summary="Update patient data")
@@ -308,7 +309,6 @@ def update_patient(
 
     finally:
         cursor.close()
-        conn.close()
 
 
 @router.delete("/batch-delete", summary="Delete multiple patients by ID")
@@ -362,6 +362,52 @@ def delete_patients(
     finally:
         try:
             cursor.close()
-            conn.close()
         except:
             pass
+
+
+def explain(
+    patient_id: int,
+    conn: MySQLConnection = Depends(get_db_connection),
+) -> Explanation:
+    """Be warned that this function may take a long time if it's a cold start for the Lambda function"""
+
+    cursor = conn.cursor(dictionary=True)
+
+    # Retrieve the patient's features
+    cursor.execute(
+        """
+        SELECT mean_radius, mean_texture, mean_perimeter, mean_area, mean_smoothness
+        FROM breast_cancer_patients WHERE id = %s
+        """,
+        patient_id,
+    )
+    patient_features = cursor.fetchone()
+
+    # Invoke the explainer Lambda with the features
+    lambda_client = boto3.client("lambda", region_name=os.environ["AWS_DEFAULT_REGION"])
+    response = lambda_client.invoke(
+        FunctionName=EXPLAINER_LAMBDA_NAME,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(patient_features),
+    )
+
+    raw = response.get("Payload").read().decode("utf-8")
+    explanation_json = json.loads(raw)
+    explanation = Explanation(**explanation_json)
+
+    # Update the patient's diagnosis in case their old diagnosis was on an earlier version of the model so maybe it will change
+    cursor.execute(
+        """
+        UPDATE breast_cancer_patients
+        SET diagnosis = %s
+        WHERE id = %s
+        """,
+        (
+            explanation.diagnosis,
+            patient_id,
+        ),
+    )
+    conn.commit()
+
+    return explanation

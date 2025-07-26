@@ -103,8 +103,6 @@ def start_conversation(
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
 
 
 def get_conversation_history(
@@ -204,5 +202,3 @@ def chat(request: ChatRequest, conn: MySQLConnection = Depends(get_db_connection
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()

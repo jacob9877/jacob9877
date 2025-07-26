@@ -99,8 +99,6 @@ def login(
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
 
 
 @router.post(
@@ -192,8 +190,6 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
 
 
 @router.get(
@@ -238,8 +234,10 @@ def get_user_patients(
             (user_id,),
         )
 
+        rows = cursor.fetchall()
+        patients = [BreastCancerPatient(**row) for row in rows]
         return ResponseModel[list[BreastCancerPatient]](
-            data=cursor.fetchall(), detail="Patients retrieved successfully"
+            data=patients, detail="Patients retrieved successfully"
         )
 
     except HTTPException as http_error:
@@ -261,8 +259,6 @@ def get_user_patients(
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
 
 
 @router.get(
@@ -334,8 +330,6 @@ def get_user_conversations(
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
 
 
 @router.post("/reset-password", response_description="Reset password for a user")

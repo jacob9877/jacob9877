@@ -71,5 +71,3 @@ def get_conversation(
     finally:
         if cursor:
             cursor.close()
-        if conn:
-            conn.close()
