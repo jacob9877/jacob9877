@@ -79,7 +79,7 @@ def insert_patient(
 def add_patients(
     cursor: MySQLCursor,
     add_patients_request: AddBreastCancerPatientsRequest,
-) -> List[str]:
+) -> list[str]:
     instances = [
         list(patient.model_dump(exclude={"user_id"}).values())
         for patient in add_patients_request.patients
@@ -312,7 +312,7 @@ def update_patient(
 
 @router.delete("/batch-delete", summary="Delete multiple patients by ID")
 def delete_patients(
-    patient_ids: List[int] = Body(
+    patient_ids: list[int] = Body(
         ..., embed=True, description="List of patient IDs to delete"
     ),
     conn: MySQLConnection = Depends(get_db_connection),
