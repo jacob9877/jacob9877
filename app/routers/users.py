@@ -1,44 +1,19 @@
-import os
-import secrets
-import smtplib
 import traceback
 
 import bcrypt
 import mysql.connector
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
-from mysql.connector.cursor import MySQLCursor
 from pydantic import BaseModel, EmailStr, Field
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
 from app.models.common_models import ResponseModel
+from app.models.conversation_models import ConversationSummary
+from app.models.user_models import LoginRequest, RegisterRequest, UserResponse
 from app.utils.db import get_db_connection, user_exists
 
 router = APIRouter(prefix="/users", tags=["users"])
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
-    )
-    password: str = Field(..., description="User's password", example="password123")
-
-
-class RegisterRequest(BaseModel):
-    username: str = Field(..., description="User's username", example="johndoe")
-    email: EmailStr = Field(
-        ..., description="User's email address", example="johndoe@gmail.com"
-    )
-    password: str = Field(..., description="User's password", example="password123")
-
-
-class UserResponse(BaseModel):
-    id: int = Field(..., description="User ID", example=1)
-    username: str = Field(..., description="User's username", example="johndoe")
-    email: EmailStr = Field(
-        ..., description="User's email address", example="johndoe@gmail.com"
-    )
 
 
 class PasswordResetRequest(BaseModel):
@@ -239,7 +214,10 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
         },
     },
 )
-def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_connection)):
+def get_user_patients(
+    user_id: int = Path(description="ID of the user to fetch patients for", example=1),
+    conn: MySQLConnection = Depends(get_db_connection),
+):
     try:
         cursor = conn.cursor(dictionary=True)
 
@@ -262,6 +240,79 @@ def get_user_patients(user_id: int, conn: MySQLConnection = Depends(get_db_conne
 
         return ResponseModel[list[BreastCancerPatient]](
             data=cursor.fetchall(), detail="Patients retrieved successfully"
+        )
+
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except mysql.connector.Error as db_error:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@router.get(
+    "/{user_id}/conversations",
+    summary="Get conversation summaries for a user",
+    description="Retrieves all conversations for the given user, sorted by the most recently updated",
+    response_model=ResponseModel[list[ConversationSummary]],
+    response_description="Returns all conversations, sorted by most recently updated",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "User with the provided ID does not exist",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def get_user_conversations(
+    user_id: int = Path(
+        description="ID of the user to fetch conversations for", example=1
+    ),
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        # Check if user exists
+        if not user_exists(cursor, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found",
+            )
+
+        cursor.execute(
+            """
+            SELECT id, title
+            FROM conversations
+            WHERE user_id = %s
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        )
+
+        rows = cursor.fetchall()
+        conversations = [ConversationSummary(**row) for row in rows]
+        return ResponseModel[list[ConversationSummary]](
+            data=conversations, detail="Fetched conversations successfully"
         )
 
     except HTTPException as http_error:

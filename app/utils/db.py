@@ -18,3 +18,8 @@ def get_db_connection() -> MySQLConnection:
 def user_exists(cursor: MySQLCursor, user_id: int) -> bool:
     cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
     return cursor.fetchone() is not None
+
+
+def conversation_exists(cursor: MySQLCursor, conversation_id: int) -> bool:
+    cursor.execute("SELECT id FROM conversations WHERE id = %s", (conversation_id,))
+    return cursor.fetchone() is not None

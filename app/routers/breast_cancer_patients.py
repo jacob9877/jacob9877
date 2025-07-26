@@ -124,8 +124,9 @@ def add_patients_json(
     add_patients_request: AddBreastCancerPatientsRequest,
     conn: MySQLConnection = Depends(get_db_connection),
 ):
-    cursor = conn.cursor(dictionary=True)
     try:
+        cursor = conn.cursor(dictionary=True)
+
         if not user_exists(cursor, add_patients_request.user_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
