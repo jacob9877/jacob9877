@@ -144,7 +144,7 @@ def insert_message(cursor: MySQLCursor, conversation_id: int, role: str, content
 
 
 @router.post(
-    "/",
+    "",
     summary="Send a message to get a reply",
     description="Take in a message from the user, and given this message plus the previous conversation history, send a reply back to the user using Gemini",
     response_model=ResponseModel[ChatResponse],
