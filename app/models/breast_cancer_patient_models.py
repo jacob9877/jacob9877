@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ class AddBreastCancerPatientsRequest(BaseModel):
     user_id: int = Field(
         ..., description="ID of the user adding the patients", example=1
     )
-    patients: List[BreastCancerPatientFeatures] = Field(
+    patients: list[BreastCancerPatientFeatures] = Field(
         ..., min_items=1, description="List of breast cancer patients to add"
     )
 
