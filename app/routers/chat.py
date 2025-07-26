@@ -23,7 +23,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post(
     "/start",
     summary="Start a conversation",
-    description="Start a conversation by creating a new conversation and adding a pre-seeded assistant message to it",
+    description="Starts a conversation by creating a new conversation and adding a pre-seeded assistant message to it",
     response_model=ResponseModel[StartConversationResponse],
     response_description="ID of the newly created conversation, and the pre-seeded assistant message that should be presented to the user",
     status_code=status.HTTP_201_CREATED,
