@@ -30,13 +30,13 @@ from app.utils.file_parser import parse_csv
 
 router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patients"])
 
-ENDPOINT_NAME = "breast-cancer-endpoint"
+SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
 
 
 def get_predictions(instances: list[list[float]]) -> list[Literal[0, 1]]:
     sagemaker_client = boto3.client("sagemaker-runtime")
     response = sagemaker_client.invoke_endpoint(
-        EndpointName=ENDPOINT_NAME,
+        EndpointName=SAGEMAKER_ENDPOINT_NAME,
         ContentType="application/json",
         Body=json.dumps({"instances": instances}),
     )
