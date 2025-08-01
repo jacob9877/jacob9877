@@ -103,7 +103,7 @@ def add_patients(
 
 
 @router.post(
-    "/add-patients",
+    "",
     summary="Add multiple breast cancer patients",
     description="Add multiple breast cancer patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
     response_model=ResponseModel[list[BreastCancerPatient]],
@@ -173,7 +173,7 @@ def add_patients_json(
 
 
 @router.post(
-    "/add-patients/csv",
+    "/csv",
     summary="Add multiple breast cancer patients via CSV upload",
     description="Add multiple breast cancer patients with their features and user ID",
     response_model=ResponseModel[list[BreastCancerPatient]],
@@ -311,7 +311,7 @@ def update_patient(
         cursor.close()
 
 
-@router.delete("/batch-delete", summary="Delete multiple patients by ID")
+@router.delete("", summary="Delete multiple patients by IDs")
 def delete_patients(
     patient_ids: list[int] = Body(
         ..., embed=True, description="List of patient IDs to delete"

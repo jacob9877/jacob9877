@@ -19,7 +19,7 @@ class Message(BaseModel):
 
 
 @router.get(
-    "/conversation/{conversation_id}",
+    "/{conversation_id}",
     response_model=ResponseModel[list[Message]],
     summary="Get all messages in a conversation",
 )
