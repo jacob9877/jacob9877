@@ -16,7 +16,7 @@ from app.models.chat_models import (
 )
 from app.models.common_models import ResponseModel
 from app.utils.db import conversation_exists, get_db_connection, user_exists
-from app.utils.gemini_utils import get_gemini_response
+from app.utils.gemini_utils import get_gemini_response, get_gemini_title
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -144,9 +144,9 @@ def insert_message(cursor: MySQLCursor, conversation_id: int, role: str, content
 @router.post(
     "",
     summary="Send a message to get a reply",
-    description="Take in a message from the user, and given this message plus the previous conversation history, send a reply back to the user using Gemini",
+    description="Take in a message from the user, and given this message plus the previous conversation history, send a reply back to the user using Gemini. May also include a new conversation title if this is the first user message of the conversation",
     response_model=ResponseModel[ChatResponse],
-    response_description="Returns the assistant reply",
+    response_description='Returns the assistant reply and potentially a new conversation title (will be "" if not created)',
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_404_NOT_FOUND: {
@@ -175,12 +175,30 @@ def chat(request: ChatRequest, conn: MySQLConnection = Depends(get_db_connection
 
         assistant_reply = get_gemini_response(history)
 
+        conversation_title = ""
+        # Generate a conversation title if this is the user's first message
+        if len([message for message in history if message.role == "user"]) == 1:
+            conversation_title = get_gemini_title(history)
+            cursor.execute(
+                """
+                UPDATE conversations
+                SET title = %s
+                WHERE id = %s
+                """,
+                (
+                    conversation_title,
+                    request.conversation_id,
+                ),
+            )
+
         insert_message(cursor, request.conversation_id, "assistant", assistant_reply)
         conn.commit()
 
         return ResponseModel[ChatResponse](
-            data=ChatResponse(assistant_reply=assistant_reply),
-            detail="Reply generated successfully",
+            data=ChatResponse(
+                assistant_reply=assistant_reply, conversation_title=conversation_title
+            ),
+            detail="Reply and title generated successfully",
         )
 
     except HTTPException as http_error:

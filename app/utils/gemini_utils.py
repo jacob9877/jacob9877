@@ -70,22 +70,45 @@ Please provide helpful, accurate information about breast cancer while emphasizi
 """
 
 
-def get_gemini_response(history: list[Message]) -> str:
-
-    history_contents = [
+def format_history(history: list[Message]) -> list[types.Content]:
+    return [
         types.Content(
             role=message.role, parts=[types.Part.from_text(text=message.content)]
         )
         for message in history
     ]
-    print(f"Initializing Gemini chat with history {history_contents}")
+
+
+def get_gemini_response(history: list[Message]) -> str:
 
     response = client.models.generate_content(
         model="gemini-2.0-flash-lite",
-        contents=history_contents,
+        contents=format_history(history),
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT, temperature=0.0
         ),
     )
 
     return response.text
+
+
+TITLE_SYSTEM_PROMPT = """
+You are an expert in creating concise but expressive titles.
+You will create titles for a chatbot where users can have multiple conversations.
+You will take in the user's first message and create a concise title (40 characters or less) for the conversation.
+The title should concisely describe what the conversation is about and what the user is asking.
+The casing should be that of a sentence: The first word should be capitalized but everything else (except names) should be lowercase
+"""
+
+
+def get_gemini_title(history: list[Message]) -> str:
+
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-lite",
+        contents=format_history(history),
+        config=types.GenerateContentConfig(
+            system_instruction=TITLE_SYSTEM_PROMPT, temperature=0.0
+        ),
+    )
+
+    return response.text.strip()

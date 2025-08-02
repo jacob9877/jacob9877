@@ -39,6 +39,10 @@ class ChatResponse(BaseModel):
         description="AI's reply to the message",
         example="As requested, here are some common struggles...",
     )
+    conversation_title: str = Field(
+        description='Newly created title of the conversation. This is (currently) only created and sent back to the caller if this is the user\'s first message of the conversation. Otherwise, this will be ""',
+        example="Inquiries about breast cancer",
+    )
 
 
 class Message(BaseModel):
