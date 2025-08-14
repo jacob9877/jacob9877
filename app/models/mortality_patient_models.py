@@ -11,7 +11,7 @@ class MortalityPatientFeatures(BaseModel):
         ...,
         description="Patient's age in years",
         gt=0,
-        example=53,
+        example=53.0,
     )
     height: float = Field(
         ...,
@@ -49,19 +49,19 @@ class MortalityPatientFeatures(BaseModel):
         ...,
         description="Minimum heart rate during ICU day 1 (beats/min)",
         gt=0,
-        example=72,
+        example=72.0,
     )
     d1_resprate_min: float = Field(
         ...,
         description="Minimum respiratory rate during ICU day 1 (breaths/min)",
         gt=0,
-        example=12,
+        example=12.0,
     )
     d1_resprate_max: float = Field(
         ...,
         description="Maximum respiratory rate during ICU day 1 (breaths/min)",
         gt=0,
-        example=27,
+        example=27.0,
     )
 
     # Lab results
@@ -81,7 +81,7 @@ class MortalityPatientFeatures(BaseModel):
         ...,
         description="Maximum serum sodium during ICU day 1 (mEq/L)",
         gt=0,
-        example=137,
+        example=137.0,
     )
 
 
