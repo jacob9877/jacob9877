@@ -10,21 +10,18 @@ class MortalityPatientFeatures(BaseModel):
     age: float = Field(
         ...,
         description="Patient's age in years",
-        json_schema_extra={"feature_group": "demographics"},
         gt=0,
         example=53,
     )
     height: float = Field(
         ...,
         description="Patient's height in centimeters",
-        json_schema_extra={"feature_group": "demographics"},
         gt=0,
         example=177.6,
     )
     weight: float = Field(
         ...,
         description="Patient's weight in kilograms",
-        json_schema_extra={"feature_group": "demographics"},
         gt=0,
         example=80.4,
     )
@@ -33,19 +30,16 @@ class MortalityPatientFeatures(BaseModel):
     ventilated_apache: Literal[0, 1] = Field(
         ...,
         description="Mechanical ventilation status in first 24h per APACHE (0 = no, 1 = yes)",
-        json_schema_extra={"feature_group": "apache"},
         example=1,
     )
     apache_4a_icu_death_prob: float = Field(
         ...,
         description="APACHE IVa predicted ICU mortality probability",
-        json_schema_extra={"feature_group": "apache"},
         example=0.03,
     )
     apache_3j_diagnosis: float = Field(
         ...,
         description="APACHE III (3J) primary diagnosis code (numeric category)",
-        json_schema_extra={"feature_group": "apache"},
         gt=0,
         example=501.05,
     )
@@ -54,21 +48,18 @@ class MortalityPatientFeatures(BaseModel):
     d1_heartrate_min: float = Field(
         ...,
         description="Minimum heart rate during ICU day 1 (beats/min)",
-        json_schema_extra={"feature_group": "vitals"},
         gt=0,
         example=72,
     )
     d1_resprate_min: float = Field(
         ...,
         description="Minimum respiratory rate during ICU day 1 (breaths/min)",
-        json_schema_extra={"feature_group": "vitals"},
         gt=0,
         example=12,
     )
     d1_resprate_max: float = Field(
         ...,
         description="Maximum respiratory rate during ICU day 1 (breaths/min)",
-        json_schema_extra={"feature_group": "vitals"},
         gt=0,
         example=27,
     )
@@ -77,19 +68,16 @@ class MortalityPatientFeatures(BaseModel):
     d1_bun_min: float = Field(
         ...,
         description="Minimum blood urea nitrogen during ICU day 1 (mg/dL)",
-        json_schema_extra={"feature_group": "labs"},
         gt=0,
     )
     d1_hemaglobin_min: float = Field(
         ...,
         description="Minimum hemoglobin during ICU day 1 (g/dL)",
-        json_schema_extra={"feature_group": "labs"},
         gt=0,
     )
     d1_sodium_max: float = Field(
         ...,
         description="Maximum serum sodium during ICU day 1 (mEq/L)",
-        json_schema_extra={"feature_group": "labs"},
         gt=0,
     )
 
