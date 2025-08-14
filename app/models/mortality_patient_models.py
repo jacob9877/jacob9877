@@ -69,16 +69,19 @@ class MortalityPatientFeatures(BaseModel):
         ...,
         description="Minimum blood urea nitrogen during ICU day 1 (mg/dL)",
         gt=0,
+        example=23.8,
     )
     d1_hemaglobin_min: float = Field(
         ...,
         description="Minimum hemoglobin during ICU day 1 (g/dL)",
         gt=0,
+        example=10.4,
     )
     d1_sodium_max: float = Field(
         ...,
         description="Maximum serum sodium during ICU day 1 (mEq/L)",
         gt=0,
+        example=137,
     )
 
 
