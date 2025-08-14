@@ -8,7 +8,11 @@ from mysql.connector import MySQLConnection
 from pydantic import BaseModel
 
 from app.models.common_models import ResponseModel
-from app.utils.db import conversation_exists, get_db_connection
+from app.utils.db import (
+    conversation_exists,
+    get_conversation_history,
+    get_db_connection,
+)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -20,8 +24,21 @@ class Message(BaseModel):
 
 @router.get(
     "/{conversation_id}",
-    response_model=ResponseModel[list[Message]],
     summary="Get all messages in a conversation",
+    description="Get all messages for the conversation with the provided ID",
+    response_model=ResponseModel[list[Message]],
+    response_description="Messages sorted by message_order",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Conversation not found",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
 )
 def get_conversation(
     conversation_id: int = Path(
@@ -38,16 +55,8 @@ def get_conversation(
                 detail=f"Conversation with ID {conversation_id} not found",
             )
 
-        cursor.execute(
-            """
-            SELECT role, content FROM messages
-            WHERE conversation_id = %s ORDER BY message_order ASC
-            """,
-            (conversation_id,),
-        )
+        messages = get_conversation_history(cursor, conversation_id)
 
-        rows = cursor.fetchall()
-        messages = [Message(**row) for row in rows]
         return ResponseModel[list[Message]](
             data=messages, detail="Conversation fetched successfully"
         )
@@ -56,11 +65,6 @@ def get_conversation(
         return JSONResponse(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
-        )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
         )
     except Exception as e:
         traceback.print_exc()

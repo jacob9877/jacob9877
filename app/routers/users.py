@@ -1,11 +1,10 @@
 import traceback
 
 import bcrypt
-import mysql.connector
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
 from app.models.common_models import ResponseModel
@@ -51,10 +50,13 @@ def login(
         cursor = conn.cursor(dictionary=True)
 
         # Looks up user by email
-        cursor.execute(
-            "SELECT id, username, password_hash FROM users WHERE email = %s",
-            (login_request.email,),
-        )
+        operation = """
+            SELECT id, username, password_hash
+            FROM users
+            WHERE email = %s
+        """
+        params = (login_request.email,)
+        cursor.execute(operation, params)
         user = cursor.fetchone()
 
         # Checks if the user exists
@@ -85,12 +87,8 @@ def login(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
-        )
     except Exception as e:
+        conn.rollback()  # Keep rollback here in case we decide to log login requests later
         traceback.print_exc()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -124,20 +122,26 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
         cursor = conn.cursor(dictionary=True)
 
         # Check if user exists with provided username
-        cursor.execute(
-            "SELECT id FROM users WHERE username = %s",
-            (user.username,),
-        )
+        operation = """
+            SELECT id
+            FROM users
+            WHERE username = %s
+        """
+        params = (user.username,)
+        cursor.execute(operation, params)
         if cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Username is taken"
             )
 
         # Check if user exists with provided email
-        cursor.execute(
-            "SELECT id FROM users WHERE email = %s",
-            (user.email,),
-        )
+        operation = """
+            SELECT id
+            FROM users
+            WHERE email = %s
+        """
+        params = (user.email,)
+        cursor.execute(operation, params)
         if cursor.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="Email is taken"
@@ -147,17 +151,16 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
         hashed_pw = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
 
         # Insert user into database
-        cursor.execute(
-            """
+        operation = """
             INSERT INTO users (username, email, password_hash)
             VALUES (%s, %s, %s)
-            """,
-            (
-                user.username,
-                user.email,
-                hashed_pw,
-            ),
+        """
+        params = (
+            user.username,
+            user.email,
+            hashed_pw,
         )
+        cursor.execute(operation, params)
         conn.commit()
 
         user_id = cursor.lastrowid
@@ -176,12 +179,8 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
-        )
     except Exception as e:
+        conn.rollback()
         traceback.print_exc()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -225,14 +224,14 @@ def get_user_patients(
             )
 
         # Get all patients for the user, sorted by updated_at descending
-        cursor.execute(
-            """
-            SELECT * FROM breast_cancer_patients 
+        operation = """
+            SELECT *
+            FROM breast_cancer_patients 
             WHERE user_id = %s 
             ORDER BY updated_at DESC
-            """,
-            (user_id,),
-        )
+        """
+        params = (user_id,)
+        cursor.execute(operation, params)
 
         rows = cursor.fetchall()
         patients = [BreastCancerPatient(**row) for row in rows]
@@ -244,11 +243,6 @@ def get_user_patients(
         return JSONResponse(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
-        )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
         )
     except Exception as e:
         traceback.print_exc()
@@ -295,15 +289,14 @@ def get_user_conversations(
                 detail=f"User with ID {user_id} not found",
             )
 
-        cursor.execute(
-            """
+        operation = """
             SELECT id, title
             FROM conversations
             WHERE user_id = %s
-            ORDER BY id DESC
-            """,
-            (user_id,),
-        )
+            ORDER BY updated_at DESC, id DESC
+        """
+        params = (user_id,)
+        cursor.execute(operation, params)
 
         rows = cursor.fetchall()
         conversations = [ConversationSummary(**row) for row in rows]
@@ -315,11 +308,6 @@ def get_user_conversations(
         return JSONResponse(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
-        )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
         )
     except Exception as e:
         traceback.print_exc()
@@ -348,9 +336,7 @@ def reset_password(
             )
 
         # user.token = secrets.token_urlsafe(16)
-        hashed_pw = bcrypt.hashpw()(
-            user.new_password.encode(), bcrypt.gensalt()
-        ).decode()
+        hashed_pw = bcrypt.hashpw(user.new_password.encode(), bcrypt.gensalt()).decode()
 
         cursor.execute(
             """

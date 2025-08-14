@@ -4,7 +4,6 @@ import traceback
 from typing import Literal, Optional
 
 import boto3
-import mysql.connector
 from fastapi import (
     APIRouter,
     Body,
@@ -19,15 +18,16 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
-from pydantic import BaseModel
 
 from app.models.breast_cancer_patient_models import (
     AddBreastCancerPatientsRequest,
     BreastCancerPatient,
     BreastCancerPatientFeatures,
     Explanation,
+    UpdateBreastCancerPatientRequest,
 )
 from app.models.common_models import ResponseModel
+from app.utils.aws import get_predictions
 from app.utils.db import get_db_connection, user_exists
 from app.utils.file_parser import parse_csv
 
@@ -36,59 +36,40 @@ router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patien
 SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
 EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
 
-
-def get_predictions(instances: list[list[float]]) -> list[Literal[0, 1]]:
-    sagemaker_client = boto3.client("sagemaker-runtime")
-    response = sagemaker_client.invoke_endpoint(
-        EndpointName=SAGEMAKER_ENDPOINT_NAME,
-        ContentType="application/json",
-        Body=json.dumps({"instances": instances}),
-    )
-    result_raw = response["Body"].read().decode("utf-8")
-    result = json.loads(result_raw)
-    predictions = [
-        prediction[0] if isinstance(prediction, list) else prediction
-        for prediction in result["predictions"]
-    ]
-    return predictions
+FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
 
 
 # We went with a inserting a single patient at a time because cursor.execute() returns the newly created ID whereas cursor.executemany() does not
-def insert_patient(
+def _insert_patient(
     cursor: MySQLCursor,
     user_id: int,
     patient: BreastCancerPatientFeatures,
     diagnosis: Literal[0, 1],
 ) -> int:
-    cursor.execute(
-        """
-        INSERT INTO breast_cancer_patients (
-            user_id, mean_radius, mean_texture, mean_perimeter,
-            mean_area, mean_smoothness, diagnosis
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            user_id,
-            patient.mean_radius,
-            patient.mean_texture,
-            patient.mean_perimeter,
-            patient.mean_area,
-            patient.mean_smoothness,
-            diagnosis,
-        ),
+    column_names = ["user_id", *FEATURE_NAMES, "diagnosis"]
+    placeholders = ", ".join(["%s"] * len(column_names))
+    operation = f"""
+        INSERT INTO breast_cancer_patients ({", ".join(column_names)})
+        VALUES ({placeholders})
+    """
+    params = tuple(
+        [user_id]
+        + [getattr(patient, feature_name) for feature_name in FEATURE_NAMES]
+        + [diagnosis]
     )
+    cursor.execute(operation, params)
     return cursor.lastrowid
 
 
-def add_patients(
+def _add_patients(
     cursor: MySQLCursor,
     add_patients_request: AddBreastCancerPatientsRequest,
-) -> list[str]:
+) -> list[int]:
     instances = [
         list(patient.model_dump(exclude={"user_id"}).values())
         for patient in add_patients_request.patients
     ]
-    diagnoses = get_predictions(instances)
+    diagnoses = get_predictions(instances, SAGEMAKER_ENDPOINT_NAME)
 
     assert len(diagnoses) == len(
         add_patients_request.patients
@@ -96,7 +77,7 @@ def add_patients(
 
     inserted_ids = []
     for patient, diagnosis in zip(add_patients_request.patients, diagnoses):
-        pid = insert_patient(cursor, add_patients_request.user_id, patient, diagnosis)
+        pid = _insert_patient(cursor, add_patients_request.user_id, patient, diagnosis)
         inserted_ids.append(pid)
 
     return inserted_ids
@@ -137,15 +118,18 @@ def add_patients_json(
                 detail=f"User with ID {add_patients_request.user_id} not found",
             )
 
-        inserted_ids = add_patients(cursor, add_patients_request)
+        inserted_ids = _add_patients(cursor, add_patients_request)
         conn.commit()
-
-        query = f"""
-            SELECT * FROM breast_cancer_patients
-            WHERE id IN ({','.join(['%s'] * len(inserted_ids))})
-            ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
+        # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
+        placeholders = ",".join(["%s"] * len(inserted_ids))
+        operation = f"""
+            SELECT * 
+            FROM breast_cancer_patients
+            WHERE id IN ({placeholders})
+            ORDER BY FIELD(id, {placeholders})
         """
-        cursor.execute(query, inserted_ids * 2)
+        params = tuple(inserted_ids) * 2
+        cursor.execute(operation, params)
         rows = cursor.fetchall()
         inserted_patients = [BreastCancerPatient(**row) for row in rows]
         return ResponseModel[list[BreastCancerPatient]](
@@ -157,12 +141,8 @@ def add_patients_json(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
-        )
     except Exception as e:
+        conn.rollback()
         traceback.print_exc()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -218,15 +198,18 @@ def add_patients_csv(
             user_id=user_id, patients=parsed_patients
         )
 
-        inserted_ids = add_patients(cursor, add_patients_request)
+        inserted_ids = _add_patients(cursor, add_patients_request)
         conn.commit()
-
-        query = f"""
-            SELECT * FROM breast_cancer_patients
-            WHERE id IN ({','.join(['%s'] * len(inserted_ids))})
-            ORDER BY FIELD(id, {','.join(['%s'] * len(inserted_ids))})
+        # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
+        placeholders = ",".join(["%s"] * len(inserted_ids))
+        operation = f"""
+            SELECT *
+            FROM breast_cancer_patients
+            WHERE id IN ({placeholders})
+            ORDER BY FIELD(id, {placeholders})
         """
-        cursor.execute(query, inserted_ids * 2)
+        params = tuple(inserted_ids) * 2
+        cursor.execute(operation, params)
         rows = cursor.fetchall()
         inserted_patients = [BreastCancerPatient(**row) for row in rows]
         return ResponseModel[list[BreastCancerPatient]](
@@ -238,10 +221,185 @@ def add_patients_csv(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
-    except mysql.connector.Error as db_error:
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@router.get(
+    "/{patient_id}",
+    summary="Get a patient by ID",
+    response_model=ResponseModel[BreastCancerPatient],
+    response_description="Returns the breast cancer patient with the provided ID",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def get_patient(
+    patient_id: int = Path(..., description="ID of the patient to get"),
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        operation = """
+            SELECT *
+            FROM breast_cancer_patients
+            WHERE id = %s
+        """
+        params = (patient_id,)
+        cursor.execute(operation, params)
+
+        row = cursor.fetchone()
+
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Breast cancer patient with ID {patient_id} not found",
+            )
+
+        return ResponseModel[BreastCancerPatient](
+            data=BreastCancerPatient(**row), detail="Patient fetched successfully"
+        )
+
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+
+    finally:
+        cursor.close()
+
+
+def _update_and_repredict(
+    *,
+    cursor,
+    patient_id: int,
+    partial_update: Optional[
+        UpdateBreastCancerPatientRequest
+    ] = UpdateBreastCancerPatientRequest(),  # None -> repredict-only
+) -> BreastCancerPatient:
+
+    # Fetch current features
+    operation = f"""
+        SELECT {', '.join(FEATURE_NAMES)}
+        FROM breast_cancer_patients
+        WHERE id=%s
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Breast cancer patient with ID {patient_id} not found",
+        )
+
+    current_features = BreastCancerPatientFeatures(**row)
+
+    # Merge features
+    incoming = partial_update.model_dump(exclude_unset=True)
+    combined_features = current_features.model_copy(update=incoming)
+
+    # Re-predict
+    instance = [
+        getattr(combined_features, feature_name) for feature_name in FEATURE_NAMES
+    ]
+    new_diagnosis = get_predictions([instance], SAGEMAKER_ENDPOINT_NAME)[0]
+
+    # Figure out which columns truly changed
+    changed_features = [
+        feature_name
+        for feature_name in FEATURE_NAMES
+        if getattr(combined_features, feature_name)
+        != getattr(current_features, feature_name)
+    ]
+
+    # Build the SQL update query dynamically based on which features actually changed (update the diagnosis no matter what)
+    column_names = changed_features + ["diagnosis"]
+    set_clause = ", ".join(f"{column_name}=%s" for column_name in column_names)
+    operation = f"""
+        UPDATE breast_cancer_patients
+        SET {set_clause}
+        WHERE id=%s
+    """
+    params = tuple(
+        [getattr(combined_features, feature_name) for feature_name in changed_features]
+        + [
+            new_diagnosis,
+            patient_id,
+        ]
+    )
+    cursor.execute(operation, params)
+
+    # Return full row
+    operation = """
+        SELECT *
+        FROM breast_cancer_patients
+        WHERE id=%s
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    return BreastCancerPatient(**row)
+
+
+@router.post(
+    "/{patient_id}/repredict",
+    summary="Re-predict a patient's diagnosis",
+    description="Re-predicts and saves the patient's diagnosis using the latest model. **No request body.**",
+    response_model=ResponseModel[BreastCancerPatient],
+    response_description="Returns the updated patient with the new diagnosis",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def repredict_patient(
+    patient_id: int = Path(..., description="ID of the patient to re-predict"),
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        updated_patient = _update_and_repredict(cursor=cursor, patient_id=patient_id)
+        conn.commit()
+        return ResponseModel[BreastCancerPatient](
+            data=updated_patient, detail="Re-predicted successfully"
+        )
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
     except Exception as e:
         traceback.print_exc()
@@ -254,61 +412,55 @@ def add_patients_csv(
             cursor.close()
 
 
-@router.put("/{patient_id}", summary="Update patient data")
+@router.patch(
+    "/{patient_id}",
+    summary="Update a patient (and re-predict)",
+    description="Provide any subset of features to update; the diagnosis is always re-predicted and saved.",
+    response_model=ResponseModel[BreastCancerPatient],
+    response_description="Returns the updated patient",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
 def update_patient(
     patient_id: int = Path(..., description="ID of the patient to update"),
-    updated_data: BreastCancerPatientFeatures = ...,  # user_id is not editable
+    new_patient_data: UpdateBreastCancerPatientRequest = Body(
+        ..., description="Fields to update (at least one)"
+    ),
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
         cursor = conn.cursor(dictionary=True)
 
-        # Check if patient exists
-        cursor.execute(
-            "SELECT * FROM breast_cancer_patients WHERE id = %s", (patient_id,)
-        )
-        patient = cursor.fetchone()
-        if not patient:
-            raise HTTPException(
-                status_code=404, detail=f"Patient ID {patient_id} not found"
-            )
-
-        # Update the patient
-        cursor.execute(
-            """
-            UPDATE breast_cancer_patients SET
-                mean_radius=%s, mean_texture=%s, mean_perimeter=%s,
-                mean_area=%s, mean_smoothness=%s, updated_at=NOW()
-            WHERE id=%s
-            """,
-            (
-                updated_data.mean_radius,
-                updated_data.mean_texture,
-                updated_data.mean_perimeter,
-                updated_data.mean_area,
-                updated_data.mean_smoothness,
-                patient_id,
-            ),
+        updated_patient = _update_and_repredict(
+            cursor=cursor, patient_id=patient_id, partial_update=new_patient_data
         )
         conn.commit()
-
-        # Return the updated row
-        cursor.execute(
-            "SELECT * FROM breast_cancer_patients WHERE id = %s", (patient_id,)
+        return ResponseModel[BreastCancerPatient](
+            data=updated_patient, detail="Patient updated successfully"
         )
-        return cursor.fetchone()
-
-    except HTTPException as e:
-        raise e
-
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500, detail="Server error while updating patient"
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
         )
-
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
 
 
 @router.delete("", summary="Delete multiple patients by IDs")
@@ -354,6 +506,7 @@ def delete_patients(
         raise e
 
     except Exception as e:
+        conn.rollback()
         traceback.print_exc()
         raise HTTPException(
             status_code=500, detail="Server error while deleting patients"
@@ -374,14 +527,13 @@ def explain(
 
     cursor = conn.cursor(dictionary=True)
 
-    # Retrieve the patient's features
-    cursor.execute(
-        """
-        SELECT mean_radius, mean_texture, mean_perimeter, mean_area, mean_smoothness
+    operation = f"""
+        SELECT {", ".join(FEATURE_NAMES)} 
         FROM breast_cancer_patients WHERE id = %s
-        """,
-        patient_id,
-    )
+    """
+    params = (patient_id,)
+    # Retrieve the patient's features
+    cursor.execute(operation, params)
     patient_features = cursor.fetchone()
 
     # Invoke the explainer Lambda with the features
@@ -397,17 +549,16 @@ def explain(
     explanation = Explanation(**explanation_json)
 
     # Update the patient's diagnosis in case their old diagnosis was on an earlier version of the model so maybe it will change
-    cursor.execute(
-        """
+    operation = """ 
         UPDATE breast_cancer_patients
         SET diagnosis = %s
         WHERE id = %s
-        """,
-        (
-            explanation.diagnosis,
-            patient_id,
-        ),
+    """
+    params = (
+        explanation.diagnosis,
+        patient_id,
     )
+    cursor.execute(operation, params)
     conn.commit()
 
     return explanation

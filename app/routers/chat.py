@@ -10,12 +10,16 @@ from mysql.connector.cursor import MySQLCursor
 from app.models.chat_models import (
     ChatRequest,
     ChatResponse,
-    Message,
     StartConversationRequest,
     StartConversationResponse,
 )
 from app.models.common_models import ResponseModel
-from app.utils.db import conversation_exists, get_db_connection, user_exists
+from app.utils.db import (
+    conversation_exists,
+    get_conversation_history,
+    get_db_connection,
+    user_exists,
+)
 from app.utils.gemini_utils import get_gemini_response, get_gemini_title
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -55,24 +59,22 @@ def start_conversation(
         # CHANGE THIS LATER
         title = f"Convo that began at {datetime.now().isoformat()}"
 
-        # Insert with user_id (aligned with schema)
-        cursor.execute(
-            """
+        operation = """
             INSERT INTO conversations (user_id, title) 
             VALUES (%s, %s)
-            """,
-            (request.user_id, title),
-        )
+        """
+        params = (request.user_id, title)
+        cursor.execute(operation, params)
 
         conversation_id = cursor.lastrowid
 
         assistant_message = "Hi, I'm Barry! How can I help you?"
-        cursor.execute(
-            """
+        operation = """
             INSERT INTO messages (conversation_id, role, content, message_order)
-            VALUES (%s, 'assistant', %s, 1)""",
-            (conversation_id, assistant_message),
-        )
+            VALUES (%s, 'assistant', %s, 1)
+        """
+        params = (conversation_id, assistant_message)
+        cursor.execute(operation, params)
         conn.commit()
 
         return ResponseModel[StartConversationResponse](
@@ -89,12 +91,8 @@ def start_conversation(
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
-        )
     except Exception as e:
+        conn.rollback()
         traceback.print_exc()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -105,40 +103,26 @@ def start_conversation(
             cursor.close()
 
 
-def get_conversation_history(
-    cursor: MySQLCursor, conversation_id: int
-) -> list[Message]:
-    cursor.execute(
-        """
-        SELECT role, content FROM messages
-        WHERE conversation_id = %s ORDER BY message_order
-        """,
-        (conversation_id,),
-    )
-    rows = cursor.fetchall()
+def _insert_message(cursor: MySQLCursor, conversation_id: int, role: str, content: str):
 
-    # Format for Gemini API
-    return [Message(**row) for row in rows]
-
-
-def insert_message(cursor: MySQLCursor, conversation_id: int, role: str, content: str):
-
-    cursor.execute(
-        """SELECT MAX(message_order) FROM messages WHERE conversation_id = %s""",
-        (conversation_id,),
-    )
+    operation = """
+        SELECT MAX(message_order)
+        FROM messages
+        WHERE conversation_id = %s
+    """
+    params = (conversation_id,)
+    cursor.execute(operation, params)
     result = cursor.fetchone()
     next_order = (
         result["MAX(message_order)"] or 0
     ) + 1  # Assuming cursor has dictionary=True
 
-    cursor.execute(
-        """
+    operation = """
         INSERT INTO messages (conversation_id, role, content, message_order)
         VALUES (%s, %s, %s, %s)
-        """,
-        (conversation_id, role, content, next_order),
-    )
+    """
+    params = (conversation_id, role, content, next_order)
+    cursor.execute(operation, params)
 
 
 @router.post(
@@ -169,7 +153,7 @@ def chat(request: ChatRequest, conn: MySQLConnection = Depends(get_db_connection
                 detail=f"Conversation with ID {request.conversation_id} not found",
             )
 
-        insert_message(cursor, request.conversation_id, "user", request.user_message)
+        _insert_message(cursor, request.conversation_id, "user", request.user_message)
 
         history = get_conversation_history(cursor, request.conversation_id)
 
@@ -179,19 +163,18 @@ def chat(request: ChatRequest, conn: MySQLConnection = Depends(get_db_connection
         # Generate a conversation title if this is the user's first message
         if len([message for message in history if message.role == "user"]) == 1:
             conversation_title = get_gemini_title(history)
-            cursor.execute(
-                """
+            operation = """
                 UPDATE conversations
                 SET title = %s
                 WHERE id = %s
-                """,
-                (
-                    conversation_title,
-                    request.conversation_id,
-                ),
+            """
+            params = (
+                conversation_title,
+                request.conversation_id,
             )
+            cursor.execute(operation, params)
 
-        insert_message(cursor, request.conversation_id, "assistant", assistant_reply)
+        _insert_message(cursor, request.conversation_id, "assistant", assistant_reply)
         conn.commit()
 
         return ResponseModel[ChatResponse](
@@ -206,12 +189,8 @@ def chat(request: ChatRequest, conn: MySQLConnection = Depends(get_db_connection
             status_code=http_error.status_code,
             content=ResponseModel[None](detail=http_error.detail).model_dump(),
         )
-    except mysql.connector.Error as db_error:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(db_error)).model_dump(),
-        )
     except Exception as e:
+        conn.rollback()
         traceback.print_exc()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

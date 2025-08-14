@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing_extensions import Self
 
 
 class BreastCancerPatientFeatures(BaseModel):
@@ -92,3 +93,11 @@ class Explanation(BaseModel):
         ...,
         description="SHAP-based breakdown of how each feature shifted the prediction from the expected value to the final probability",
     )
+
+
+class UpdateBreastCancerPatientRequest(BaseModel):
+    mean_radius: Optional[float] = Field(default=None, gt=0, example=13.54)
+    mean_texture: Optional[float] = Field(default=None, gt=0, example=14.36)
+    mean_perimeter: Optional[float] = Field(default=None, gt=0, example=87.46)
+    mean_area: Optional[float] = Field(default=None, gt=0, example=566.3)
+    mean_smoothness: Optional[float] = Field(default=None, gt=0, example=0.09779)
