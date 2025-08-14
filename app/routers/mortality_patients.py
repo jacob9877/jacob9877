@@ -20,37 +20,37 @@ from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
-from app.models.breast_cancer_patient_models import (
-    AddBreastCancerPatientsRequest,
-    BreastCancerPatient,
-    BreastCancerPatientFeatures,
-    Explanation,
-    UpdateBreastCancerPatientRequest,
-)
 from app.models.common_models import ResponseModel
+from app.models.mortality_patient_models import (
+    AddMortalityPatientsRequest,
+    Explanation,
+    MortalityPatient,
+    MortalityPatientFeatures,
+    UpdateMortalityPatientRequest,
+)
 from app.utils.aws import get_predictions
 from app.utils.db import get_db_connection, user_exists
 from app.utils.file_parser import parse_csv
 
-router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patients"])
+router = APIRouter(prefix="/mortality-patients", tags=["mortality-patients"])
 
-SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
-EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
+SAGEMAKER_ENDPOINT_NAME = "mortality-classifier"
+EXPLAINER_LAMBDA_NAME = "mortality-classifier-explainer"
 
-FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
+FEATURE_NAMES = list(MortalityPatientFeatures.model_fields.keys())
 
 
 # We went with a inserting a single patient at a time because cursor.execute() returns the newly created ID whereas cursor.executemany() does not
 def _insert_patient(
     cursor: MySQLCursor,
     user_id: int,
-    patient: BreastCancerPatientFeatures,
+    patient: MortalityPatientFeatures,
     diagnosis: Literal[0, 1],
 ) -> int:
     column_names = ["user_id", *FEATURE_NAMES, "diagnosis"]
     placeholders = ", ".join(["%s"] * len(column_names))
     operation = f"""
-        INSERT INTO breast_cancer_patients ({", ".join(column_names)})
+        INSERT INTO mortality_patients ({", ".join(column_names)})
         VALUES ({placeholders})
     """
     params = tuple(
@@ -64,7 +64,7 @@ def _insert_patient(
 
 def _add_patients(
     cursor: MySQLCursor,
-    add_patients_request: AddBreastCancerPatientsRequest,
+    add_patients_request: AddMortalityPatientsRequest,
 ) -> list[int]:
     instances = [
         list(patient.model_dump(exclude={"user_id"}).values())
@@ -86,10 +86,10 @@ def _add_patients(
 
 @router.post(
     "",
-    summary="Add multiple breast cancer patients",
-    description="Add multiple breast cancer patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
-    response_model=ResponseModel[list[BreastCancerPatient]],
-    response_description="Returns the newly created breast cancer patients",
+    summary="Add multiple mortality patients",
+    description="Add multiple mortality patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
+    response_model=ResponseModel[list[MortalityPatient]],
+    response_description="Returns the newly created mortality patients",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_400_BAD_REQUEST: {
@@ -107,7 +107,7 @@ def _add_patients(
     },
 )
 def add_patients_json(
-    add_patients_request: AddBreastCancerPatientsRequest,
+    add_patients_request: AddMortalityPatientsRequest,
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
@@ -125,15 +125,15 @@ def add_patients_json(
         placeholders = ",".join(["%s"] * len(inserted_ids))
         operation = f"""
             SELECT * 
-            FROM breast_cancer_patients
+            FROM mortality_patients
             WHERE id IN ({placeholders})
             ORDER BY FIELD(id, {placeholders})
         """
         params = tuple(inserted_ids) * 2
         cursor.execute(operation, params)
         rows = cursor.fetchall()
-        inserted_patients = [BreastCancerPatient(**row) for row in rows]
-        return ResponseModel[list[BreastCancerPatient]](
+        inserted_patients = [MortalityPatient(**row) for row in rows]
+        return ResponseModel[list[MortalityPatient]](
             data=inserted_patients, detail="Patients added successfully"
         )
 
@@ -155,10 +155,10 @@ def add_patients_json(
 
 @router.post(
     "/csv",
-    summary="Add multiple breast cancer patients via CSV upload",
-    description="Add multiple breast cancer patients with their features and user ID",
-    response_model=ResponseModel[list[BreastCancerPatient]],
-    response_description="Returns the newly created breast cancer patients",
+    summary="Add multiple mortality patients via CSV upload",
+    description="Add multiple mortality patients with their features and user ID",
+    response_model=ResponseModel[list[MortalityPatient]],
+    response_description="Returns the newly created mortality patients",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_400_BAD_REQUEST: {
@@ -195,7 +195,7 @@ def add_patients_csv(
         print(f"Parsed {len(parsed_patients)} patients from CSV.")
 
         # Load into request class to validate there's at least 1 patient
-        add_patients_request = AddBreastCancerPatientsRequest(
+        add_patients_request = AddMortalityPatientsRequest(
             user_id=user_id, patients=parsed_patients
         )
 
@@ -205,15 +205,15 @@ def add_patients_csv(
         placeholders = ",".join(["%s"] * len(inserted_ids))
         operation = f"""
             SELECT *
-            FROM breast_cancer_patients
+            FROM mortality_patients
             WHERE id IN ({placeholders})
             ORDER BY FIELD(id, {placeholders})
         """
         params = tuple(inserted_ids) * 2
         cursor.execute(operation, params)
         rows = cursor.fetchall()
-        inserted_patients = [BreastCancerPatient(**row) for row in rows]
-        return ResponseModel[list[BreastCancerPatient]](
+        inserted_patients = [MortalityPatient(**row) for row in rows]
+        return ResponseModel[list[MortalityPatient]](
             data=inserted_patients, detail="Patients added successfully"
         )
 
@@ -237,8 +237,8 @@ def add_patients_csv(
 @router.get(
     "/{patient_id}",
     summary="Get a patient by ID",
-    response_model=ResponseModel[BreastCancerPatient],
-    response_description="Returns the breast cancer patient with the provided ID",
+    response_model=ResponseModel[MortalityPatient],
+    response_description="Returns the mortality patient with the provided ID",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_404_NOT_FOUND: {
@@ -260,7 +260,7 @@ def get_patient(
 
         operation = """
             SELECT *
-            FROM breast_cancer_patients
+            FROM mortality_patients
             WHERE id = %s
         """
         params = (patient_id,)
@@ -271,11 +271,11 @@ def get_patient(
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Breast cancer patient with ID {patient_id} not found",
+                detail=f"Mortality patient with ID {patient_id} not found",
             )
 
-        return ResponseModel[BreastCancerPatient](
-            data=BreastCancerPatient(**row), detail="Patient fetched successfully"
+        return ResponseModel[MortalityPatient](
+            data=MortalityPatient(**row), detail="Patient fetched successfully"
         )
 
     except HTTPException as http_error:
@@ -299,14 +299,14 @@ def _update_and_repredict(
     cursor,
     patient_id: int,
     partial_update: Optional[
-        UpdateBreastCancerPatientRequest
-    ] = UpdateBreastCancerPatientRequest(),  # None -> repredict-only
-) -> BreastCancerPatient:
+        UpdateMortalityPatientRequest
+    ] = UpdateMortalityPatientRequest(),  # None -> repredict-only
+) -> MortalityPatient:
 
     # Fetch current features
     operation = f"""
         SELECT {', '.join(FEATURE_NAMES)}
-        FROM breast_cancer_patients
+        FROM mortality_patients
         WHERE id=%s
     """
     params = (patient_id,)
@@ -315,10 +315,10 @@ def _update_and_repredict(
     if row is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Breast cancer patient with ID {patient_id} not found",
+            detail=f"Mortality patient with ID {patient_id} not found",
         )
 
-    current_features = BreastCancerPatientFeatures(**row)
+    current_features = MortalityPatientFeatures(**row)
 
     # Merge features
     incoming = partial_update.model_dump(exclude_unset=True)
@@ -342,7 +342,7 @@ def _update_and_repredict(
     column_names = changed_features + ["diagnosis"]
     set_clause = ", ".join(f"{column_name}=%s" for column_name in column_names)
     operation = f"""
-        UPDATE breast_cancer_patients
+        UPDATE mortality_patients
         SET {set_clause}
         WHERE id=%s
     """
@@ -358,20 +358,20 @@ def _update_and_repredict(
     # Return full row
     operation = """
         SELECT *
-        FROM breast_cancer_patients
+        FROM mortality_patients
         WHERE id=%s
     """
     params = (patient_id,)
     cursor.execute(operation, params)
     row = cursor.fetchone()
-    return BreastCancerPatient(**row)
+    return MortalityPatient(**row)
 
 
 @router.post(
     "/{patient_id}/repredict",
     summary="Re-predict a patient's diagnosis",
     description="Re-predicts and saves the patient's diagnosis using the latest model. **No request body.**",
-    response_model=ResponseModel[BreastCancerPatient],
+    response_model=ResponseModel[MortalityPatient],
     response_description="Returns the updated patient with the new diagnosis",
     status_code=status.HTTP_200_OK,
     responses={
@@ -394,7 +394,7 @@ def repredict_patient(
 
         updated_patient = _update_and_repredict(cursor=cursor, patient_id=patient_id)
         conn.commit()
-        return ResponseModel[BreastCancerPatient](
+        return ResponseModel[MortalityPatient](
             data=updated_patient, detail="Re-predicted successfully"
         )
     except HTTPException as http_error:
@@ -417,7 +417,7 @@ def repredict_patient(
     "/{patient_id}",
     summary="Update a patient (and re-predict)",
     description="Provide any subset of features to update; the diagnosis is always re-predicted and saved.",
-    response_model=ResponseModel[BreastCancerPatient],
+    response_model=ResponseModel[MortalityPatient],
     response_description="Returns the updated patient",
     status_code=status.HTTP_200_OK,
     responses={
@@ -433,7 +433,7 @@ def repredict_patient(
 )
 def update_patient(
     patient_id: int = Path(..., description="ID of the patient to update"),
-    new_patient_data: UpdateBreastCancerPatientRequest = Body(
+    new_patient_data: UpdateMortalityPatientRequest = Body(
         ..., description="Fields to update (at least one)"
     ),
     conn: MySQLConnection = Depends(get_db_connection),
@@ -445,7 +445,7 @@ def update_patient(
             cursor=cursor, patient_id=patient_id, partial_update=new_patient_data
         )
         conn.commit()
-        return ResponseModel[BreastCancerPatient](
+        return ResponseModel[MortalityPatient](
             data=updated_patient, detail="Patient updated successfully"
         )
     except HTTPException as http_error:
@@ -498,7 +498,7 @@ def delete_patients(
         placeholders = ",".join(["%s"] * len(patient_ids))
         operation = f"""
             SELECT id
-            FROM breast_cancer_patients
+            FROM mortality_patients
             WHERE id IN ({placeholders})
         """
         params = tuple(patient_ids)
@@ -515,7 +515,7 @@ def delete_patients(
 
         # Perform delete
         operation = f"""
-            DELETE FROM breast_cancer_patients
+            DELETE FROM mortality_patients
             WHERE id IN ({placeholders})
         """
         params = tuple(patient_ids)
@@ -554,7 +554,7 @@ def explain(
 
     operation = f"""
         SELECT {", ".join(FEATURE_NAMES)} 
-        FROM breast_cancer_patients
+        FROM mortality_patients
         WHERE id = %s
     """
     params = (patient_id,)
@@ -576,7 +576,7 @@ def explain(
 
     # Update the patient's diagnosis in case their old diagnosis was on an earlier version of the model so maybe it will change
     operation = """ 
-        UPDATE breast_cancer_patients
+        UPDATE mortality_patients
         SET diagnosis = %s
         WHERE id = %s
     """
