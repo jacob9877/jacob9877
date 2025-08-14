@@ -5,7 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
-from app.routers import breast_cancer_patients, chat, conversations, users
+from app.routers import (
+    breast_cancer_patients,
+    chat,
+    conversations,
+    mortality_patients,
+    users,
+)
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -14,6 +20,7 @@ app = FastAPI(root_path="/beta")  # root_path must match the API Gateway stage n
 # routers
 app.include_router(users.router)
 app.include_router(breast_cancer_patients.router)
+app.include_router(mortality_patients.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
 
