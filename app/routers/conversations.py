@@ -1,25 +1,15 @@
 import traceback
-from typing import Literal
 
-import mysql.connector
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
-from pydantic import BaseModel
 
+from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
-from app.utils.db import (
-    conversation_exists,
-    get_conversation_history,
-    get_db_connection,
-)
+from app.utils.db import conversation_exists, get_db_connection
+from app.utils.llm import get_conversation_history
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
-
-
-class Message(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
 
 
 @router.get(
@@ -55,7 +45,7 @@ def get_conversation(
                 detail=f"Conversation with ID {conversation_id} not found",
             )
 
-        messages = get_conversation_history(cursor, conversation_id)
+        messages = get_conversation_history(conversation_id)
 
         return ResponseModel[list[Message]](
             data=messages, detail="Conversation fetched successfully"

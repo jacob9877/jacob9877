@@ -44,19 +44,3 @@ def conversation_exists(cursor: MySQLCursor, conversation_id: int) -> bool:
     cursor.execute(operation, params)
 
     return cursor.fetchone() is not None
-
-
-def get_conversation_history(
-    cursor: MySQLCursor, conversation_id: int
-) -> list[Message]:
-    operation = """
-        SELECT role, content
-        FROM messages
-        WHERE conversation_id = %s
-        ORDER BY message_order
-    """
-    params = (conversation_id,)
-    cursor.execute(operation, params)
-
-    rows = cursor.fetchall()
-    return [Message(**row) for row in rows]
