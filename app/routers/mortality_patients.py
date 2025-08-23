@@ -314,7 +314,7 @@ def _update_and_repredict(
     row = cursor.fetchone()
     if row is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Mortality patient with ID {patient_id} not found",
         )
 
