@@ -5,8 +5,6 @@ import mysql.connector
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
-from app.models.chat_models import Message
-
 
 def get_db_connection() -> Generator[MySQLConnection, Any, Any]:
     conn = mysql.connector.connect(

@@ -1,20 +1,12 @@
 import traceback
-from datetime import datetime
 
-import mysql.connector
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
-from mysql.connector.cursor import MySQLCursor
 
-from app.models.chat_models import (
-    ChatRequest,
-    ChatResponse,
-    StartConversationRequest,
-    StartConversationResponse,
-)
+from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
-from app.utils.db import conversation_exists, get_db_connection, user_exists
+from app.utils.db import conversation_exists, get_db_connection
 from app.utils.llm import get_chat_response, get_gemini_title
 
 router = APIRouter(prefix="/chat", tags=["chat"])

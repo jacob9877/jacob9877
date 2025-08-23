@@ -3,8 +3,6 @@ import os
 import traceback
 from typing import Literal, Optional
 
-import boto3
-import mysql.connector
 from fastapi import (
     APIRouter,
     Body,
