@@ -3,7 +3,6 @@ import os
 import traceback
 from typing import Literal, Optional
 
-import boto3
 from fastapi import (
     APIRouter,
     Body,
@@ -21,10 +20,10 @@ from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
 from app.models.breast_cancer_patient_models import (
+    FEATURE_NAMES,
     AddBreastCancerPatientsRequest,
     BreastCancerPatient,
     BreastCancerPatientFeatures,
-    Explanation,
     UpdateBreastCancerPatientRequest,
 )
 from app.models.common_models import ResponseModel
@@ -36,8 +35,6 @@ router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patien
 
 SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
 EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
-
-FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
 
 
 # We went with a inserting a single patient at a time because cursor.execute() returns the newly created ID whereas cursor.executemany() does not
@@ -542,49 +539,3 @@ def delete_patients(
     finally:
         if cursor:
             cursor.close()
-
-
-def explain(
-    patient_id: int,
-    conn: MySQLConnection = Depends(get_db_connection),
-) -> Explanation:
-    """Be warned that this function may take a long time if it's a cold start for the Lambda function"""
-
-    cursor = conn.cursor(dictionary=True)
-
-    operation = f"""
-        SELECT {", ".join(FEATURE_NAMES)} 
-        FROM breast_cancer_patients
-        WHERE id = %s
-    """
-    params = (patient_id,)
-    # Retrieve the patient's features
-    cursor.execute(operation, params)
-    patient_features = cursor.fetchone()
-
-    # Invoke the explainer Lambda with the features
-    lambda_client = boto3.client("lambda", region_name=os.environ["AWS_DEFAULT_REGION"])
-    response = lambda_client.invoke(
-        FunctionName=EXPLAINER_LAMBDA_NAME,
-        InvocationType="RequestResponse",
-        Payload=json.dumps(patient_features),
-    )
-
-    raw = response.get("Payload").read().decode("utf-8")
-    explanation_json = json.loads(raw)
-    explanation = Explanation(**explanation_json)
-
-    # Update the patient's diagnosis in case their old diagnosis was on an earlier version of the model so maybe it will change
-    operation = """ 
-        UPDATE breast_cancer_patients
-        SET diagnosis = %s
-        WHERE id = %s
-    """
-    params = (
-        explanation.diagnosis,
-        patient_id,
-    )
-    cursor.execute(operation, params)
-    conn.commit()
-
-    return explanation

@@ -13,6 +13,9 @@ class BreastCancerPatientFeatures(BaseModel):
     mean_smoothness: float = Field(..., gt=0, example=0.09779)
 
 
+FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
+
+
 class AddBreastCancerPatientsRequest(BaseModel):
     user_id: int = Field(
         ..., description="ID of the user adding the patients", example=1
