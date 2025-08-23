@@ -1,28 +1,27 @@
-import traceback
 import os
-import bcrypt
-import jwt 
-import mysql.connector
+import traceback
+from datetime import datetime, timedelta, timezone
 
+import bcrypt
+import jwt
+import mysql.connector
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
-from pydantic import BaseModel, EmailStr, Field
-from datetime import datetime, timedelta, timezone
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import ConversationSummary
-from app.utils.db import get_db_connection, user_exists
-from app.utils.email_utils import send_reset_email
+from app.models.mortality_patient_models import MortalityPatient
 from app.models.user_models import (
     LoginRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     RegisterRequest,
     UserResponse,
-    PasswordResetRequest,
-    PasswordResetConfirm,
 )
-
+from app.utils.db import get_db_connection, user_exists
+from app.utils.email_utils import send_reset_email
 
 SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")
@@ -200,11 +199,11 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
 
 
 @router.get(
-    "/{user_id}/patients",
-    summary="Get all patients for a user",
+    "/{user_id}/breast-cancer-patients",
+    summary="Get all breast cancer patients for a user",
     description="Retrieves all breast cancer patients associated with a specific user, sorted by the most recently updated",
     response_model=ResponseModel[list[BreastCancerPatient]],
-    response_description="Returns all patients for a user, sorted by most recently updated",
+    response_description="Returns all breast cancer patients for a user, sorted by most recently updated",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_404_NOT_FOUND: {
@@ -217,8 +216,10 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
         },
     },
 )
-def get_user_patients(
-    user_id: int = Path(description="ID of the user to fetch patients for", example=1),
+def get_user_breast_cancer_patients(
+    user_id: int = Path(
+        description="ID of the user to fetch breast cancer patients for", example=1
+    ),
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
@@ -244,6 +245,72 @@ def get_user_patients(
         rows = cursor.fetchall()
         patients = [BreastCancerPatient(**row) for row in rows]
         return ResponseModel[list[BreastCancerPatient]](
+            data=patients, detail="Patients retrieved successfully"
+        )
+
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@router.get(
+    "/{user_id}/mortality-patients",
+    summary="Get all mortality patients for a user",
+    description="Retrieves all mortality patients associated with a specific user, sorted by the most recently updated",
+    response_model=ResponseModel[list[MortalityPatient]],
+    response_description="Returns all mortality patients for a user, sorted by most recently updated",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "User with the provided ID does not exist",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def get_user_mortality_patients(
+    user_id: int = Path(
+        description="ID of the user to fetch mortality patients for", example=1
+    ),
+    conn: MySQLConnection = Depends(get_db_connection),
+):
+    try:
+        cursor = conn.cursor(dictionary=True)
+
+        # Check if user exists
+        if not user_exists(cursor, user_id):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found",
+            )
+
+        # Get all patients for the user, sorted by updated_at descending
+        operation = """
+            SELECT *
+            FROM mortality_patients
+            WHERE user_id = %s 
+            ORDER BY updated_at DESC
+        """
+        params = (user_id,)
+        cursor.execute(operation, params)
+
+        rows = cursor.fetchall()
+        patients = [MortalityPatient(**row) for row in rows]
+        return ResponseModel[list[MortalityPatient]](
             data=patients, detail="Patients retrieved successfully"
         )
 
@@ -374,8 +441,7 @@ async def request_password_reset(
 
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="User not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
         payload = {
@@ -388,7 +454,7 @@ async def request_password_reset(
         await send_reset_email(data.email, token)
         return ResponseModel[dict](
             data={"message": "Password reset link sent to your email"},
-            detail="Password reset email sent"
+            detail="Password reset email sent",
         )
     except HTTPException as http_error:
         return JSONResponse(
@@ -450,29 +516,26 @@ def reset_password(
         payload = jwt.decode(data.token, SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("purpose") != "password_reset":
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Invalid token purpose"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid token purpose"
             )
 
         user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail="Invalid token"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid token"
             )
 
         hashed_pw = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
 
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE users SET password_hash = %s WHERE id = %s", 
-            (hashed_pw, user_id)
+            "UPDATE users SET password_hash = %s WHERE id = %s", (hashed_pw, user_id)
         )
         conn.commit()
 
         return ResponseModel[dict](
             data={"message": "Password reset successfully"},
-            detail="Password has been reset successfully"
+            detail="Password has been reset successfully",
         )
     except jwt.ExpiredSignatureError:
         return JSONResponse(
@@ -480,7 +543,7 @@ def reset_password(
             content=ResponseModel[None](detail="Token expired").model_dump(),
         )
     except jwt.InvalidTokenError as e:
-        print("JWT decode error:", str(e))  
+        print("JWT decode error:", str(e))
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content=ResponseModel[None](detail=f"Invalid token: {str(e)}").model_dump(),
@@ -496,7 +559,7 @@ def reset_password(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=ResponseModel[None](detail=str(e)).model_dump(),
         )
-    
+
     finally:
         if cursor:
             cursor.close()
