@@ -1,18 +1,26 @@
+import base64
 import os
 import traceback
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import bcrypt
 import jwt
 import mysql.connector
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 
-from app.models.breast_cancer_patient_models import BreastCancerPatient
+from app.models.breast_cancer_patient_models import (
+    BreastCancerPatient,
+    PaginatedBreastCancerPatients,
+)
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import ConversationSummary
-from app.models.mortality_patient_models import MortalityPatient
+from app.models.mortality_patient_models import (
+    MortalityPatient,
+    PaginatedMortalityPatients,
+)
 from app.models.user_models import (
     LoginRequest,
     PasswordResetConfirm,
@@ -198,14 +206,39 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
             cursor.close()
 
 
+def _encode_cursor(updated_at: datetime, row_id: int) -> str:
+    # Use microsecond precision to avoid collisions; ensure ISO string is consistent
+    payload = f"{updated_at.isoformat(timespec='microseconds')}|{row_id}"
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("utf-8").rstrip("=")
+
+
+def _decode_cursor(cursor_str: str) -> tuple[datetime, int]:
+    # Add missing '=' padding for base64 urlsafe
+    padding = "=" * (-len(cursor_str) % 4)
+    raw = base64.urlsafe_b64decode((cursor_str + padding).encode("utf-8")).decode(
+        "utf-8"
+    )
+    ts_str, id_str = raw.split("|", 1)
+    # fromisoformat handles "YYYY-MM-DDTHH:MM:SS[.ffffff]" (naive or aware)
+    dt = datetime.fromisoformat(ts_str)
+    return dt, int(id_str)
+
+
 @router.get(
     "/{user_id}/breast-cancer-patients",
-    summary="Get all breast cancer patients for a user",
-    description="Retrieves all breast cancer patients associated with a specific user, sorted by the most recently updated",
-    response_model=ResponseModel[list[BreastCancerPatient]],
-    response_description="Returns all breast cancer patients for a user, sorted by most recently updated",
+    summary="Get breast cancer patients for a user (cursor-based pagination)",
+    description=(
+        "Retrieves breast cancer patients for a user using cursor-based pagination, "
+        "sorted by most recently updated."
+    ),
+    response_model=ResponseModel[PaginatedBreastCancerPatients],
+    response_description="Returns a page of patients plus a next_cursor if more data exists",
     status_code=status.HTTP_200_OK,
     responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Cursor is invalid",
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
             "description": "User with the provided ID does not exist",
@@ -216,36 +249,88 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
         },
     },
 )
-def get_user_breast_cancer_patients(
+def get_user_breast_cancer_patients_paginated(
     user_id: int = Path(
         description="ID of the user to fetch breast cancer patients for", example=1
+    ),
+    # Optional cursor from previous response
+    cursor_token: Optional[str] = Query(
+        default=None,
+        alias="cursor",
+        description="Opaque cursor returned from the previous page (base64url)",
+        example="MjAyNS0wOC0yM1QxNjoyMDozMC4xMjM0NTY|12345 (base64url-encoded)",
+    ),
+    limit: int = Query(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max number of patients to return (1–100)",
     ),
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
         cursor = conn.cursor(dictionary=True)
 
-        # Check if user exists
         if not user_exists(cursor, user_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User with ID {user_id} not found",
             )
 
-        # Get all patients for the user, sorted by updated_at descending
+        # Order is (updated_at DESC, id DESC).
+        # For "next page", fetch rows strictly "after" the cursor in that order:
+        # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
         operation = """
             SELECT *
-            FROM breast_cancer_patients 
-            WHERE user_id = %s 
-            ORDER BY updated_at DESC
+            FROM breast_cancer_patients
+            WHERE user_id = %s
         """
-        params = (user_id,)
-        cursor.execute(operation, params)
 
+        params: list = [user_id]
+
+        if cursor_token:
+            try:
+                last_timestamp, last_id = _decode_cursor(cursor_token)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
+                )
+            operation += """
+                AND (
+                    updated_at < %s
+                    OR (updated_at = %s AND id < %s)
+                )
+            """
+            params.extend([last_timestamp, last_timestamp, last_id])
+
+        # Apply ORDER BY and LIMIT + 1 (to see if there's another page)
+        operation += " ORDER BY updated_at DESC, id DESC LIMIT %s"
+        params.append(limit + 1)
+
+        cursor.execute(operation, tuple(params))
         rows = cursor.fetchall()
+
+        # Build response items and next cursor (if we fetched limit+1)
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]  # only return 'limit' items
+
         patients = [BreastCancerPatient(**row) for row in rows]
-        return ResponseModel[list[BreastCancerPatient]](
-            data=patients, detail="Patients retrieved successfully"
+
+        next_cursor: Optional[str] = None
+        if has_more and rows:
+            last_row = rows[-1]
+            last_updated_at: datetime = last_row["updated_at"]
+            last_row_id: int = last_row["id"]
+            next_cursor = _encode_cursor(last_updated_at, last_row_id)
+
+        paginated_patients = PaginatedBreastCancerPatients(
+            next_cursor=next_cursor,
+            patients=patients,
+        )
+        return ResponseModel[PaginatedBreastCancerPatients](
+            data=paginated_patients,
+            detail="Patients retrieved successfully",
         )
 
     except HTTPException as http_error:
@@ -266,12 +351,19 @@ def get_user_breast_cancer_patients(
 
 @router.get(
     "/{user_id}/mortality-patients",
-    summary="Get all mortality patients for a user",
-    description="Retrieves all mortality patients associated with a specific user, sorted by the most recently updated",
-    response_model=ResponseModel[list[MortalityPatient]],
-    response_description="Returns all mortality patients for a user, sorted by most recently updated",
+    summary="Get mortality patients for a user (cursor-based pagination)",
+    description=(
+        "Retrieves mortality patients for a user using cursor-based pagination, "
+        "sorted by most recently updated."
+    ),
+    response_model=ResponseModel[PaginatedMortalityPatients],
+    response_description="Returns a page of patients plus a next_cursor if more data exists",
     status_code=status.HTTP_200_OK,
     responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Cursor is invalid",
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
             "description": "User with the provided ID does not exist",
@@ -282,36 +374,88 @@ def get_user_breast_cancer_patients(
         },
     },
 )
-def get_user_mortality_patients(
+def get_user_mortality_patients_paginated(
     user_id: int = Path(
         description="ID of the user to fetch mortality patients for", example=1
+    ),
+    # Optional cursor from previous response
+    cursor_token: Optional[str] = Query(
+        default=None,
+        alias="cursor",
+        description="Opaque cursor returned from the previous page (base64url)",
+        example="MjAyNS0wOC0yM1QxNjoyMDozMC4xMjM0NTY|12345 (base64url-encoded)",
+    ),
+    limit: int = Query(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max number of patients to return (1–100)",
     ),
     conn: MySQLConnection = Depends(get_db_connection),
 ):
     try:
         cursor = conn.cursor(dictionary=True)
 
-        # Check if user exists
         if not user_exists(cursor, user_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User with ID {user_id} not found",
             )
 
-        # Get all patients for the user, sorted by updated_at descending
+        # Order is (updated_at DESC, id DESC).
+        # For "next page", fetch rows strictly "after" the cursor in that order:
+        # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
         operation = """
             SELECT *
             FROM mortality_patients
-            WHERE user_id = %s 
-            ORDER BY updated_at DESC
+            WHERE user_id = %s
         """
-        params = (user_id,)
-        cursor.execute(operation, params)
 
+        params: list = [user_id]
+
+        if cursor_token:
+            try:
+                last_timestamp, last_id = _decode_cursor(cursor_token)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
+                )
+            operation += """
+                AND (
+                    updated_at < %s
+                    OR (updated_at = %s AND id < %s)
+                )
+            """
+            params.extend([last_timestamp, last_timestamp, last_id])
+
+        # Apply ORDER BY and LIMIT + 1 (to see if there's another page)
+        operation += " ORDER BY updated_at DESC, id DESC LIMIT %s"
+        params.append(limit + 1)
+
+        cursor.execute(operation, tuple(params))
         rows = cursor.fetchall()
+
+        # Build response items and next cursor (if we fetched limit+1)
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]  # only return 'limit' items
+
         patients = [MortalityPatient(**row) for row in rows]
-        return ResponseModel[list[MortalityPatient]](
-            data=patients, detail="Patients retrieved successfully"
+
+        next_cursor: Optional[str] = None
+        if has_more and rows:
+            last_row = rows[-1]
+            last_updated_at: datetime = last_row["updated_at"]
+            last_row_id: int = last_row["id"]
+            next_cursor = _encode_cursor(last_updated_at, last_row_id)
+
+        paginated_patients = PaginatedMortalityPatients(
+            next_cursor=next_cursor,
+            patients=patients,
+        )
+        return ResponseModel[PaginatedMortalityPatients](
+            data=paginated_patients,
+            detail="Patients retrieved successfully",
         )
 
     except HTTPException as http_error:

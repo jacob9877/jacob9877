@@ -4,6 +4,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
+from app.models.common_models import PaginatedResults
+
 
 class BreastCancerPatientFeatures(BaseModel):
     mean_radius: float = Field(..., gt=0, example=13.54)
@@ -104,3 +106,7 @@ class UpdateBreastCancerPatientRequest(BaseModel):
     mean_perimeter: Optional[float] = Field(default=None, gt=0, example=87.46)
     mean_area: Optional[float] = Field(default=None, gt=0, example=566.3)
     mean_smoothness: Optional[float] = Field(default=None, gt=0, example=0.09779)
+
+
+class PaginatedBreastCancerPatients(PaginatedResults):
+    patients: list[BreastCancerPatient]

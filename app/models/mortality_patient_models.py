@@ -4,6 +4,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
+from app.models.common_models import PaginatedResults
+
 
 class MortalityPatientFeatures(BaseModel):
     # Demographic features
@@ -244,3 +246,7 @@ class UpdateMortalityPatientRequest(BaseModel):
         le=200,
         example=144.0,
     )
+
+
+class PaginatedMortalityPatients(PaginatedResults):
+    patients: list[MortalityPatient]
