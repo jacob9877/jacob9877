@@ -22,3 +22,10 @@ class UserResponse(BaseModel):
     email: EmailStr = Field(
         ..., description="User's email address", example="johndoe@gmail.com"
     )
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str

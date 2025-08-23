@@ -1,25 +1,32 @@
 import traceback
-
+import os
 import bcrypt
+import jwt 
 import mysql.connector
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 from pydantic import BaseModel, EmailStr, Field
+from datetime import datetime, timedelta, timezone
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import ConversationSummary
-from app.models.user_models import LoginRequest, RegisterRequest, UserResponse
 from app.utils.db import get_db_connection, user_exists
+from app.utils.email_utils import send_reset_email
+from app.models.user_models import (
+    LoginRequest,
+    RegisterRequest,
+    UserResponse,
+    PasswordResetRequest,
+    PasswordResetConfirm,
+)
 
+
+SECRET_KEY = os.getenv("JWT_SECRET")
+ALGORITHM = os.getenv("ALGORITHM")
 router = APIRouter(prefix="/users", tags=["users"])
-
-
-class PasswordResetRequest(BaseModel):
-    email: str
-    new_password: str
-    token: str
 
 
 @router.post(
@@ -332,37 +339,170 @@ def get_user_conversations(
             cursor.close()
 
 
-@router.post("/reset-password", response_description="Reset password for a user")
-def reset_password(
-    user: PasswordResetRequest, conn: MySQLConnection = Depends(get_db_connection)
+@router.post(
+    "/request-password-reset",
+    summary="Request a password reset",
+    description="""
+    **Frontend Responsibilities:**
+    - Provide a UI form where the user can enter their email.
+    - On submit, call this endpoint with `{ "email": "<user_email>" }`.
+    - Show a success notification like: "If this email exists, you’ll receive a password reset link".
+    - Do not reveal whether an account exists or not.
+    - No token handling needed here; the reset link will be emailed.
+
+    **Backend Behavior:**
+    - Verifies the email exists in DB.
+    - Generates a reset token (valid 15 mins).
+    - Sends reset link to user's email.
+    """,
+    response_model=ResponseModel[dict],
+    response_description="Returns a confirmation message",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "User with the provided email does not exist",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+async def request_password_reset(
+    data: PasswordResetRequest, conn: MySQLConnection = Depends(get_db_connection)
 ):
+    cursor = None
     try:
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
+        user = cursor.fetchone()
 
-        cursor.execute("SELECT id FROM users WHERE email = %s", (user.email,))
-        user_data = cursor.fetchone()
-
-        if not user_data:
+        if not user:
             raise HTTPException(
-                status_code=404, detail="Account with that email does not exist"
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="User not found"
             )
 
-        # user.token = secrets.token_urlsafe(16)
-        hashed_pw = bcrypt.hashpw()(
-            user.new_password.encode(), bcrypt.gensalt()
-        ).decode()
+        payload = {
+            "sub": str(user["id"]),
+            "purpose": "password_reset",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-        cursor.execute(
-            """
-            UPDATE users 
-            SET password_hash = %s 
-            WHERE email = %s
-            """,
-            (hashed_pw, user.email),
+        await send_reset_email(data.email, token)
+        return ResponseModel[dict](
+            data={"message": "Password reset link sent to your email"},
+            detail="Password reset email sent"
         )
-        conn.commit()
-        return {"message": "Password has been changed successfully"}
-
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    finally:
+        if cursor:
+            cursor.close()
+
+
+@router.post(
+    "/reset-password",
+    summary="Reset password using token",
+    description="""
+    **Frontend Responsibilities:**
+    - Build a page `/reset-password` that extracts the `token` from the query string (e.g., `/reset-password?token=XYZ`).
+    - Provide a form where the user enters their **new password** and **confirm password**.
+    - When submitting, call this endpoint with:
+      ```json
+      {
+        "token": "<token_from_url>",
+        "new_password": "<user_new_password>"
+      }
+      ```
+    - On success, redirect the user to the login page with a success notification.
+    - On failure (expired/invalid token), show an error and prompt user to re-request a reset.
+
+    **Backend Behavior:**
+    - Validates token (checks expiration + purpose).
+    - Updates the user’s password in DB (hashed).
+    - Returns confirmation on success.
+    """,
+    response_model=ResponseModel[dict],
+    response_description="Returns confirmation of password reset",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Invalid or expired token",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ResponseModel[None],
+            "description": "An error occurred on our end",
+        },
+    },
+)
+def reset_password(
+    data: PasswordResetConfirm, conn: MySQLConnection = Depends(get_db_connection)
+):
+    cursor = None
+    try:
+        payload = jwt.decode(data.token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("purpose") != "password_reset":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Invalid token purpose"
+            )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Invalid token"
+            )
+
+        hashed_pw = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
+
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s", 
+            (hashed_pw, user_id)
+        )
+        conn.commit()
+
+        return ResponseModel[dict](
+            data={"message": "Password reset successfully"},
+            detail="Password has been reset successfully"
+        )
+    except jwt.ExpiredSignatureError:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ResponseModel[None](detail="Token expired").model_dump(),
+        )
+    except jwt.InvalidTokenError as e:
+        print("JWT decode error:", str(e))  
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=ResponseModel[None](detail=f"Invalid token: {str(e)}").model_dump(),
+        )
+    except HTTPException as http_error:
+        return JSONResponse(
+            status_code=http_error.status_code,
+            content=ResponseModel[None](detail=http_error.detail).model_dump(),
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ResponseModel[None](detail=str(e)).model_dump(),
+        )
+    
+    finally:
+        if cursor:
+            cursor.close()
