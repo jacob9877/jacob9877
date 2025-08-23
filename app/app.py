@@ -15,7 +15,11 @@ from app.routers import (
 
 load_dotenv(find_dotenv(), override=True)
 
-app = FastAPI(root_path="/beta")  # root_path must match the API Gateway stage name
+app = FastAPI(
+    root_path="/beta",
+    title="AI for Bariatric Surgery API",
+    description="All responses except auto-thrown 422 codes will follow standard response model with keys 'data' and 'detail'. Never infer anything about the value of the 'detail' key, use the status code instead.",
+)  # root_path must match the API Gateway stage name
 
 # routers
 app.include_router(users.router)
