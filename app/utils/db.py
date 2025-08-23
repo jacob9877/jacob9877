@@ -1,11 +1,12 @@
 import os
+from typing import Any, Generator
 
 import mysql.connector
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
 
 
-def get_db_connection() -> MySQLConnection:
+def get_db_connection() -> Generator[MySQLConnection, Any, Any]:
     conn = mysql.connector.connect(
         host=os.getenv("DB_HOST"),
         user=os.getenv("DB_USER"),
@@ -20,15 +21,24 @@ def get_db_connection() -> MySQLConnection:
 
 
 def user_exists(cursor: MySQLCursor, user_id: int) -> bool:
-    cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+    operation = """
+        SELECT id
+        FROM users
+        WHERE id = %s
+    """
+    params = (user_id,)
+    cursor.execute(operation, params)
+
     return cursor.fetchone() is not None
 
 
 def conversation_exists(cursor: MySQLCursor, conversation_id: int) -> bool:
-    cursor.execute("SELECT id FROM conversations WHERE id = %s", (conversation_id,))
-    return cursor.fetchone() is not None
+    operation = """
+        SELECT id
+        FROM conversations
+        WHERE id = %s
+    """
+    params = (conversation_id,)
+    cursor.execute(operation, params)
 
-
-def breast_cancer_patient_exists(cursor: MySQLCursor, patient_id: int) -> bool:
-    cursor.execute("SELECT id FROM breast-cancer-patients WHERE id = %s", (patient_id,))
     return cursor.fetchone() is not None
