@@ -2,7 +2,6 @@ import json
 import os
 import sys
 
-import boto3
 import mysql.connector
 from dotenv import find_dotenv, load_dotenv
 from langchain.chat_models import init_chat_model
@@ -83,8 +82,6 @@ KNOWLEDGE BASE:
 Please provide helpful, accurate information about breast cancer while emphasizing the importance of professional medical consultation.
 """
 
-EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
-
 
 @tool
 def explain_diagnosis(
@@ -109,42 +106,56 @@ def explain_diagnosis(
     )
     cursor = conn.cursor(dictionary=True)
 
+    columns = (
+        ["diagnosis"]  # Columns from breast_cancer_patients table
+        + FEATURE_NAMES  # Feature values from breast_cancer_patients table
+        + [
+            f"contribution_{feature_name}" for feature_name in FEATURE_NAMES
+        ]  # Contribution values from breast_cancer_explanations table
+        + [
+            "patient_id",
+            "raw_probability",
+            "threshold",
+            "expected_value",
+        ]  # Columns from breast_cancer_explanations table
+    )
+
     operation = f"""
-        SELECT {", ".join(FEATURE_NAMES)} 
+        SELECT {", ".join(columns)} 
         FROM breast_cancer_patients
-        WHERE id = %s
+        INNER JOIN breast_cancer_explanations
+            ON breast_cancer_patients.id = breast_cancer_explanations.patient_id
+        WHERE breast_cancer_explanations.patient_id = %s
     """
     params = (patient_id,)
-    # Retrieve the patient's features
     cursor.execute(operation, params)
-    patient_features = cursor.fetchone()
+    row = cursor.fetchone()
+    if row is None:
+        return {"error": f"explanation for patient {patient_id} not found"}
 
-    # Invoke the explainer Lambda with the features
-    lambda_client = boto3.client("lambda", region_name=os.environ["AWS_DEFAULT_REGION"])
-    response = lambda_client.invoke(
-        FunctionName=EXPLAINER_LAMBDA_NAME,
-        InvocationType="RequestResponse",
-        Payload=json.dumps(patient_features),
-    )
+    result = {
+        "feature_values": {},
+        "explanation": {
+            "raw_probability": row["raw_probability"],
+            "threshold": row["threshold"],
+            "diagnosis": (1 if row["raw_probability"] >= row["threshold"] else 0),
+            "expected_value": row["expected_value"],
+            "contributions": [],
+        },
+    }
+    for feature_name in FEATURE_NAMES:
+        result["feature_values"][feature_name] = row[feature_name]
+        contribution_value = row[f"contribution_{feature_name}"]
+        result["explanation"]["contributions"].append(
+            {
+                "feature": feature_name,
+                "value": contribution_value,
+                "magnitude": abs(contribution_value),
+                "direction": "up" if contribution_value > 0 else "down",
+            }
+        )
 
-    raw = response.get("Payload").read().decode("utf-8")
-    explanation_json = json.loads(raw)
-    explanation = Explanation(**explanation_json)
-
-    # Update the patient's diagnosis in case their old diagnosis was on an earlier version of the model so maybe it will change
-    operation = """ 
-        UPDATE breast_cancer_patients
-        SET diagnosis = %s
-        WHERE id = %s
-    """
-    params = (
-        explanation.diagnosis,
-        patient_id,
-    )
-    cursor.execute(operation, params)
-    conn.commit()
-
-    return explanation
+    return result
 
 
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
@@ -163,7 +174,7 @@ def get_chat_response(conversation_id: int, user_id: int, user_message: str) -> 
 
         agent = create_react_agent(
             model=model,
-            tools=[],  # Excluded explain tool because it takes so long
+            tools=[explain_diagnosis],  # Excluded explain tool because it takes so long
             prompt=SYSTEM_PROMPT,
             checkpointer=saver,
         )

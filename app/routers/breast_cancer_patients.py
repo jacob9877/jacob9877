@@ -27,7 +27,7 @@ from app.models.breast_cancer_patient_models import (
     UpdateBreastCancerPatientRequest,
 )
 from app.models.common_models import ResponseModel
-from app.utils.aws import get_predictions
+from app.utils.aws import bulk_send_message_to_sqs, get_predictions
 from app.utils.db import get_db_connection, user_exists
 from app.utils.file_parser import parse_csv
 
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/breast-cancer-patients", tags=["breast-cancer-patien
 
 SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
 EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
+EXPLANATION_QUEUE_URL = os.getenv("BREAST_CANCER_EXPLANATION_QUEUE_URL")
 
 
 # We went with a inserting a single patient at a time because cursor.execute() returns the newly created ID whereas cursor.executemany() does not
@@ -130,6 +131,14 @@ def add_patients_json(
         cursor.execute(operation, params)
         rows = cursor.fetchall()
         inserted_patients = [BreastCancerPatient(**row) for row in rows]
+
+        # Send the new patient info to SQS for explanation processing
+        messages = [
+            patient.model_dump(include=set(FEATURE_NAMES)) | {"patient_id": patient.id}
+            for patient in inserted_patients
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+
         return ResponseModel[list[BreastCancerPatient]](
             data=inserted_patients, detail="Patients added successfully"
         )
@@ -210,6 +219,14 @@ def add_patients_csv(
         cursor.execute(operation, params)
         rows = cursor.fetchall()
         inserted_patients = [BreastCancerPatient(**row) for row in rows]
+
+        # Send the new patient info to SQS for explanation processing
+        messages = [
+            patient.model_dump(include=set(FEATURE_NAMES)) | {"patient_id": patient.id}
+            for patient in inserted_patients
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+
         return ResponseModel[list[BreastCancerPatient]](
             data=inserted_patients, detail="Patients added successfully"
         )
@@ -391,6 +408,12 @@ def repredict_patient(
 
         updated_patient = _update_and_repredict(cursor=cursor, patient_id=patient_id)
         conn.commit()
+        # Send the new patient info to SQS for explanation processing
+        messages = [
+            updated_patient.model_dump(include=set(FEATURE_NAMES))
+            | {"patient_id": updated_patient.id}
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
         return ResponseModel[BreastCancerPatient](
             data=updated_patient, detail="Re-predicted successfully"
         )
@@ -442,6 +465,12 @@ def update_patient(
             cursor=cursor, patient_id=patient_id, partial_update=new_patient_data
         )
         conn.commit()
+        # Send the new patient info to SQS for explanation processing
+        messages = [
+            updated_patient.model_dump(include=set(FEATURE_NAMES))
+            | {"patient_id": updated_patient.id}
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
         return ResponseModel[BreastCancerPatient](
             data=updated_patient, detail="Patient updated successfully"
         )
