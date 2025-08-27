@@ -17,7 +17,7 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
     summary="Get all messages in a conversation",
     description="Get all messages for the conversation with the provided ID",
     response_model=ResponseModel[list[Message]],
-    response_description="Messages sorted by message_order",
+    response_description="Messages in the conversation sorted by timestamp",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_404_NOT_FOUND: {
