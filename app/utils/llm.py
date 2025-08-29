@@ -4,9 +4,11 @@ import sys
 
 import mysql.connector
 from dotenv import find_dotenv, load_dotenv
+from fastapi import HTTPException, status
 from langchain.chat_models import init_chat_model
 from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.human import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
@@ -84,9 +86,7 @@ Please provide helpful, accurate information about breast cancer while emphasizi
 
 
 @tool
-def explain_diagnosis(
-    patient_id: int,
-) -> Explanation:
+def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     """
     Explain a patient's breast cancer diagnosis.
     Returns a SHAP-based breakdown of feature contributions.
@@ -107,7 +107,7 @@ def explain_diagnosis(
     cursor = conn.cursor(dictionary=True)
 
     columns = (
-        ["diagnosis"]  # Columns from breast_cancer_patients table
+        ["diagnosis", "user_id"]  # Columns from breast_cancer_patients table
         + FEATURE_NAMES  # Feature values from breast_cancer_patients table
         + [
             f"contribution_{feature_name}" for feature_name in FEATURE_NAMES
@@ -131,7 +131,16 @@ def explain_diagnosis(
     cursor.execute(operation, params)
     row = cursor.fetchone()
     if row is None:
-        return {"error": f"explanation for patient {patient_id} not found"}
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No explanation for patient with ID {patient_id} found",
+        )
+
+    if row["user_id"] != config["configurable"].get("user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not authorized to access this patient's data",
+        )
 
     result = {
         "feature_values": {},
@@ -164,8 +173,7 @@ model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 def get_chat_response(conversation_id: int, user_id: int, user_message: str) -> str:
 
     config = {
-        "configurable": {"thread_id": conversation_id},
-        "metadata": {"user_id": user_id},
+        "configurable": {"thread_id": conversation_id, "user_id": user_id},
     }
 
     with PyMySQLSaver.from_conn_string(
@@ -174,7 +182,7 @@ def get_chat_response(conversation_id: int, user_id: int, user_message: str) -> 
 
         agent = create_react_agent(
             model=model,
-            tools=[explain_diagnosis],  # Excluded explain tool because it takes so long
+            tools=[explain_diagnosis],
             prompt=SYSTEM_PROMPT,
             checkpointer=saver,
         )
