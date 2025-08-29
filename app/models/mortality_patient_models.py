@@ -1,8 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
-from typing_extensions import Self
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.common_models import PaginatedResults
 
@@ -86,11 +85,10 @@ class MortalityPatientFeatures(BaseModel):
         example=137.0,
     )
 
+    model_config = ConfigDict(extra="allow")
+
 
 class AddMortalityPatientsRequest(BaseModel):
-    user_id: int = Field(
-        ..., description="ID of the user adding the patients", example=1
-    )
     patients: list[MortalityPatientFeatures] = Field(
         ..., min_items=1, description="List of mortality patients to add"
     )

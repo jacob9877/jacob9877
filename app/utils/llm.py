@@ -16,11 +16,11 @@ from app.models.chat_models import Message
 
 load_dotenv(find_dotenv(), override=True)
 
-DB_HOST = os.getenv("DB_HOST")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_PORT = int(os.getenv("DB_PORT"))
-DB_NAME = os.getenv("DB_NAME")
+DB_HOST = os.environ["DB_HOST"]
+DB_USER = os.environ["DB_USER"]
+DB_PASSWORD = os.environ["DB_PASSWORD"]
+DB_PORT = int(os.environ["DB_PORT"])
+DB_NAME = os.environ["DB_NAME"]
 
 BREAST_CANCER_DOCUMENTS = """
 TYPES OF BREAST CANCER:
@@ -98,11 +98,11 @@ def explain_diagnosis(
     """
 
     conn = mysql.connector.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        port=int(os.getenv("DB_PORT")),
-        database=os.getenv("DB_NAME"),
+        host=os.environ["DB_HOST"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        port=int(os.environ["DB_PORT"]),
+        database=os.environ["DB_NAME"],
     )
     cursor = conn.cursor(dictionary=True)
 

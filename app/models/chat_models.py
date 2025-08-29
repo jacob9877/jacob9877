@@ -9,9 +9,6 @@ class ChatRequest(BaseModel):
         description="ID of the conversation the user message belongs to. If None, will create a new conversation.",
         example=6,
     )
-    user_id: int = Field(
-        ..., description="ID of the conversation the message belongs to", example=1
-    )
     user_message: str = Field(
         ...,
         description="Message the user sent",

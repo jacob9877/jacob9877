@@ -1,15 +1,26 @@
 import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
-from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
 
 from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
-from app.utils.db import conversation_exists, get_db_connection
+from app.models.conversation_models import ConversationSummary
+from app.models.user_models import User
+from app.utils.db import get_conversation_by_id, get_db_connection
+from app.utils.jwt import get_and_validate_current_user_id
 from app.utils.llm import get_conversation_history
 
-router = APIRouter(prefix="/conversations", tags=["conversations"])
+router = APIRouter(
+    prefix="/conversations",
+    tags=["conversations"],
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {
+            "model": ResponseModel[None],
+            "description": "Error with provided access token",
+        },
+    },
+)
 
 
 @router.get(
@@ -24,10 +35,6 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
             "model": ResponseModel[None],
             "description": "Conversation not found",
         },
-        status.HTTP_500_INTERNAL_SERVER_ERROR: {
-            "model": ResponseModel[None],
-            "description": "An error occurred on our end",
-        },
     },
 )
 def get_conversation(
@@ -35,15 +42,22 @@ def get_conversation(
         description="ID of the conversation to return", example=1
     ),
     conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
     try:
-        cursor = conn.cursor(dictionary=True)
+        with conn.cursor(dictionary=True) as cursor:
 
-        if not conversation_exists(cursor, conversation_id):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversation with ID {conversation_id} not found",
-            )
+            conversation = get_conversation_by_id(cursor, conversation_id)
+            if not conversation:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Conversation with ID {conversation_id} not found",
+                )
+            if conversation.user_id != current_user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Not authorized to access conversation with ID {conversation_id}",
+                )
 
         messages = get_conversation_history(conversation_id)
 
@@ -51,17 +65,42 @@ def get_conversation(
             data=messages, detail="Conversation fetched successfully"
         )
 
-    except HTTPException as http_error:
-        return JSONResponse(
-            status_code=http_error.status_code,
-            content=ResponseModel[None](detail=http_error.detail).model_dump(),
-        )
     except Exception as e:
         traceback.print_exc()
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content=ResponseModel[None](detail=str(e)).model_dump(),
+        raise e
+
+
+@router.get(
+    "",
+    summary="Get conversation summaries for the logged-in user",
+    description="Retrieves all conversations for the current user (by the provided access token), sorted by the most recently updated",
+    response_model=ResponseModel[list[ConversationSummary]],
+    response_description="Returns all conversations, sorted by most recently updated",
+    status_code=status.HTTP_200_OK,
+)
+def get_user_conversations(
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+
+            operation = """
+                SELECT id, title
+                FROM conversations
+                WHERE user_id = %s
+                ORDER BY updated_at DESC, id DESC
+            """
+            params = (current_user_id,)
+            cursor.execute(operation, params)
+
+            rows = cursor.fetchall()
+
+        conversations = [ConversationSummary(**row) for row in rows]
+        return ResponseModel[list[ConversationSummary]](
+            data=conversations, detail="Fetched conversations successfully"
         )
-    finally:
-        if cursor:
-            cursor.close()
+
+    except Exception as e:
+        traceback.print_exc()
+        raise e
