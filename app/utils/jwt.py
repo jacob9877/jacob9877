@@ -74,7 +74,7 @@ def set_refresh_cookie(response: Response, refresh_token: str) -> None:
         value=refresh_token,
         httponly=True,
         secure=True,  # Important so that client cannot access this
-        samesite="lax",
+        samesite="none",
         max_age=REFRESH_TOKEN_TTL_SECONDS,
         expires=expires,
         path="/",
