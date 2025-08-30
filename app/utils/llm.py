@@ -13,8 +13,9 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 
-from app.models.breast_cancer_patient_models import FEATURE_NAMES, Explanation
+from app.models.breast_cancer_patient_models import FEATURE_NAMES, BreastCancerPatient
 from app.models.chat_models import Message
+from app.utils.db import get_breast_cancer_patient_by_id
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -86,50 +87,102 @@ Please provide helpful, accurate information about breast cancer while emphasizi
 
 
 @tool
-def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
+def get_patient_info(patient_id: int, *, config: RunnableConfig) -> BreastCancerPatient:
     """
-    Explain a patient's breast cancer diagnosis.
-    Returns a SHAP-based breakdown of feature contributions.
+    Retrieve detailed information about a breast cancer patient.
     -Inputs:
         - patient_id: integer ID (MySQL PK) of the breast cancer patient
     -Returns:
-        - An object containing the raw probability output, threshold used for classification,
-            the diagnosis (threshold applied to probability), expected value, and contributions for each feature.
+        - An object containing all feature values for the patient
     """
 
-    conn = mysql.connector.connect(
+    if patient_id != config["configurable"].get("patient_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tool input patient_id does not match the patient_id of the conversation scope.",
+        )
+
+    with mysql.connector.connect(
         host=os.environ["DB_HOST"],
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
         port=int(os.environ["DB_PORT"]),
         database=os.environ["DB_NAME"],
-    )
-    cursor = conn.cursor(dictionary=True)
+    ) as conn:
+        with conn.cursor(dictionary=True) as cursor:
 
-    columns = (
-        ["diagnosis", "user_id"]  # Columns from breast_cancer_patients table
-        + FEATURE_NAMES  # Feature values from breast_cancer_patients table
-        + [
-            f"contribution_{feature_name}" for feature_name in FEATURE_NAMES
-        ]  # Contribution values from breast_cancer_explanations table
-        + [
-            "patient_id",
-            "raw_probability",
-            "threshold",
-            "expected_value",
-        ]  # Columns from breast_cancer_explanations table
-    )
+            patient = get_breast_cancer_patient_by_id(cursor, patient_id)
 
-    operation = f"""
-        SELECT {", ".join(columns)} 
-        FROM breast_cancer_patients
-        INNER JOIN breast_cancer_explanations
-            ON breast_cancer_patients.id = breast_cancer_explanations.patient_id
-        WHERE breast_cancer_explanations.patient_id = %s
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Patient with ID {patient_id} not found",
+        )
+
+    if patient.user_id != config["configurable"].get("user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not authorized to access this patient's data",
+        )
+
+    return patient
+
+
+@tool
+def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     """
-    params = (patient_id,)
-    cursor.execute(operation, params)
-    row = cursor.fetchone()
+    Explain a patient's breast cancer diagnosis.
+    Returns a SHAP-based breakdown of feature contributions.
+    -Inputs:
+        - patient_id: integer ID (MySQL PK) of the breast cancer patient. Example: 123
+    -Returns:
+        - An object containing the raw probability output, threshold used for classification,
+            the diagnosis (threshold applied to probability), expected value, and contributions for each feature.
+    """
+
+    # If the conversation is about a patient, make ture this tool call is about the same patient
+    if config["configurable"].get("patient_id") and patient_id != config[
+        "configurable"
+    ].get("patient_id"):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tool input patient_id does not match the patient_id of the conversation scope.",
+        )
+
+    with mysql.connector.connect(
+        host=os.environ["DB_HOST"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        port=int(os.environ["DB_PORT"]),
+        database=os.environ["DB_NAME"],
+    ) as conn:
+        with conn.cursor(dictionary=True) as cursor:
+            columns = (
+                ["diagnosis", "user_id"]  # Columns from breast_cancer_patients table
+                + FEATURE_NAMES  # Feature values from breast_cancer_patients table
+                + [
+                    f"contribution_{feature_name}" for feature_name in FEATURE_NAMES
+                ]  # Contribution values from breast_cancer_explanations table
+                + [
+                    "patient_id",
+                    "raw_probability",
+                    "threshold",
+                    "expected_value",
+                ]  # Columns from breast_cancer_explanations table
+            )
+
+            operation = f"""
+                SELECT {", ".join(columns)} 
+                FROM breast_cancer_patients
+                INNER JOIN breast_cancer_explanations
+                    ON breast_cancer_patients.id = breast_cancer_explanations.patient_id
+                WHERE breast_cancer_explanations.patient_id = %s
+            """
+            params = (patient_id,)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -170,20 +223,30 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
 
-def get_chat_response(conversation_id: int, user_id: int, user_message: str) -> str:
+def get_chat_response(
+    conversation_id: int, user_id: int, patient_id: int | None, user_message: str
+) -> str:
 
     config = {
-        "configurable": {"thread_id": conversation_id, "user_id": user_id},
+        "configurable": {
+            "thread_id": conversation_id,
+            "user_id": user_id,
+            "patient_id": patient_id,
+        },
     }
 
     with PyMySQLSaver.from_conn_string(
         f"mysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     ) as saver:
 
+        prompt = SYSTEM_PROMPT
+        if patient_id:
+            prompt += f"You are chatting with a doctor about breast cancer patient with ID {patient_id}. If the user asks about any patient details you should call the appropriate with the patient id. If they ask any questions related to a patient assume it is about the patient with ID {patient_id}."
+
         agent = create_react_agent(
             model=model,
             tools=[explain_diagnosis],
-            prompt=SYSTEM_PROMPT,
+            prompt=prompt,
             checkpointer=saver,
         )
 

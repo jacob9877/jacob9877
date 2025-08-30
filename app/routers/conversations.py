@@ -5,11 +5,19 @@ from mysql.connector import MySQLConnection
 
 from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
-from app.models.conversation_models import ConversationSummary
+from app.models.conversation_models import (
+    ConversationSummary,
+    StartConversationRequest,
+    StartConversationResponse,
+)
 from app.models.user_models import User
-from app.utils.db import get_conversation_by_id, get_db_connection
+from app.utils.db import (
+    get_breast_cancer_patient_by_id,
+    get_conversation_by_id,
+    get_db_connection,
+)
 from app.utils.jwt import get_and_validate_current_user_id
-from app.utils.llm import get_conversation_history
+from app.utils.llm import get_conversation_history, get_gemini_title
 
 router = APIRouter(
     prefix="/conversations",
@@ -21,6 +29,68 @@ router = APIRouter(
         },
     },
 )
+
+
+@router.post(
+    "",
+    summary="Create a conversation",
+    description="",
+    response_model=ResponseModel[StartConversationResponse],
+    response_description="ID of the newly created conversation and the title",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to chat about the requested patient",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+    },
+)
+def start_conversation(
+    request: StartConversationRequest,
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+            # If patient_id is provided, ensure the user has access to this patient
+            if request.patient_id is not None:
+                patient = get_breast_cancer_patient_by_id(cursor, request.patient_id)
+                if patient is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Patient with ID {request.patient_id} not found",
+                    )
+                if patient.user_id != current_user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Not authorized to chat about patient with ID {request.patient_id}",
+                    )
+
+            conversation_title = get_gemini_title(request.user_message)
+            operation = """
+                INSERT INTO conversations (user_id, patient_id, title)
+                VALUES (%s, %s, %s)
+            """
+            params = (current_user_id, request.patient_id, conversation_title)
+            cursor.execute(operation, params)
+            conversation_id = cursor.lastrowid
+        conn.commit()
+
+        return ResponseModel[StartConversationResponse](
+            data=StartConversationResponse(
+                conversation_id=conversation_id, conversation_title=conversation_title
+            ),
+            detail="Conversation started successfully",
+        )
+
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise e
 
 
 @router.get(
