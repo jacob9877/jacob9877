@@ -156,7 +156,7 @@ def get_user_conversations(
         with conn.cursor(dictionary=True) as cursor:
 
             operation = """
-                SELECT id, title
+                SELECT id, title, patient_id
                 FROM conversations
                 WHERE user_id = %s
                 ORDER BY updated_at DESC, id DESC

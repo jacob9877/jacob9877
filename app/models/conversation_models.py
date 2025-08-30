@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class ConversationSummary(BaseModel):
     id: int
     title: str
+    patient_id: int | None = None  # If the conversation is patient-specific
 
 
 class Conversation(BaseModel):
