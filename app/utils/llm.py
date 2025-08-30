@@ -26,6 +26,8 @@ DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_PORT = int(os.environ["DB_PORT"])
 DB_NAME = os.environ["DB_NAME"]
 
+CHECKPOINT_NAMESPACE = "barry"
+
 BREAST_CANCER_DOCUMENTS = """
 TYPES OF BREAST CANCER:
 1. DUCTAL CARCINOMA IN SITU (DCIS) - Non-invasive cancer in milk ducts
@@ -230,6 +232,7 @@ def build_config(conversation: Conversation) -> dict:
             "thread_id": conversation.id,
             "user_id": conversation.user_id,
             "patient_id": conversation.patient_id,
+            "checkpoint_ns": CHECKPOINT_NAMESPACE,
         },
     }
     return config
