@@ -10,7 +10,6 @@ from app.models.conversation_models import (
     StartConversationRequest,
     StartConversationResponse,
 )
-from app.models.user_models import User
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
     get_conversation_by_id,
@@ -101,6 +100,10 @@ def start_conversation(
     response_description="Messages in the conversation sorted by timestamp",
     status_code=status.HTTP_200_OK,
     responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to access the requested conversation",
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
             "description": "Conversation not found",
@@ -129,7 +132,7 @@ def get_conversation(
                     detail=f"Not authorized to access conversation with ID {conversation_id}",
                 )
 
-        messages = get_conversation_history(conversation_id)
+        messages = get_conversation_history(conversation)
 
         return ResponseModel[list[Message]](
             data=messages, detail="Conversation fetched successfully"

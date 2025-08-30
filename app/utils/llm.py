@@ -15,6 +15,7 @@ from langgraph.prebuilt import create_react_agent
 
 from app.models.breast_cancer_patient_models import FEATURE_NAMES, BreastCancerPatient
 from app.models.chat_models import Message
+from app.models.conversation_models import Conversation
 from app.utils.db import get_breast_cancer_patient_by_id
 
 load_dotenv(find_dotenv(), override=True)
@@ -223,25 +224,27 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
 
-def get_chat_response(
-    conversation_id: int, user_id: int, patient_id: int | None, user_message: str
-) -> str:
-
+def build_config(conversation: Conversation) -> dict:
     config = {
         "configurable": {
-            "thread_id": conversation_id,
-            "user_id": user_id,
-            "patient_id": patient_id,
+            "thread_id": conversation.id,
+            "user_id": conversation.user_id,
+            "patient_id": conversation.patient_id,
         },
     }
+    return config
+
+
+def get_chat_response(conversation: Conversation, user_message: str) -> str:
+    config = build_config(conversation)
 
     with PyMySQLSaver.from_conn_string(
         f"mysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     ) as saver:
 
         prompt = SYSTEM_PROMPT
-        if patient_id:
-            prompt += f"You are chatting with a doctor about breast cancer patient with ID {patient_id}. If the user asks about any patient details you should call the appropriate with the patient id. If they ask any questions related to a patient assume it is about the patient with ID {patient_id}."
+        if conversation.patient_id:
+            prompt += f"You are chatting with a doctor about breast cancer patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate with the patient id. If they ask any questions related to a patient assume it is about the patient with ID {conversation.patient_id}."
 
         agent = create_react_agent(
             model=model,
@@ -265,10 +268,8 @@ def get_chat_response(
         return ai_message
 
 
-def get_conversation_history(conversation_id: int) -> list[Message]:
-    config = {
-        "configurable": {"thread_id": conversation_id},
-    }
+def get_conversation_history(conversation: Conversation) -> list[Message]:
+    config = build_config(conversation)
 
     with PyMySQLSaver.from_conn_string(
         f"mysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"

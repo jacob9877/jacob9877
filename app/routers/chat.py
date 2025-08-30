@@ -63,9 +63,7 @@ def chat_agent(
                 )
 
         assistant_reply = get_chat_response(
-            request.conversation_id,
-            current_user_id,
-            conversation.patient_id,
+            conversation,
             request.user_message,
         )
 
