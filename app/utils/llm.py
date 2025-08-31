@@ -229,11 +229,11 @@ model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 def build_config(conversation: Conversation) -> dict:
     config = {
         "configurable": {
-            "thread_id": conversation.id,
+            "thread_id": str(conversation.id),  # LangGraph likes string thread_id
             "user_id": conversation.user_id,
             "patient_id": conversation.patient_id,
-            "checkpoint_ns": CHECKPOINT_NAMESPACE,
         },
+        "checkpoint_ns": CHECKPOINT_NAMESPACE,
     }
     return config
 
