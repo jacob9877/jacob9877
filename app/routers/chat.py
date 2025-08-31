@@ -2,12 +2,13 @@ import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from mysql.connector import MySQLConnection
+from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
 from app.utils.db import get_conversation_by_id, get_db_connection
 from app.utils.jwt import get_and_validate_current_user_id
-from app.utils.llm import get_chat_response, get_gemini_title
+from app.utils.llm import get_chat_response
 
 router = APIRouter(
     prefix="/chat",
@@ -19,6 +20,19 @@ router = APIRouter(
         },
     },
 )
+
+
+def _insert_message(
+    cursor: MySQLCursorDict, conversation_id: int, role: str, content: str
+):
+    operation = """
+        INSERT INTO messages (conversation_id, role, content, message_order)
+        SELECT %s, %s, %s, COALESCE(MAX(message_order), 0) + 1
+        FROM messages
+        WHERE conversation_id = %s
+    """
+    params = (conversation_id, role, content, conversation_id)
+    cursor.execute(operation, params)
 
 
 @router.post(
@@ -62,10 +76,18 @@ def chat_agent(
                     detail=f"Not authorized to access conversation {request.conversation_id}",
                 )
 
-        assistant_reply = get_chat_response(
-            conversation,
-            request.user_message,
-        )
+            assistant_reply = get_chat_response(
+                conversation,
+                request.user_message,
+            )
+
+            _insert_message(
+                cursor, request.conversation_id, "user", request.user_message
+            )
+            _insert_message(
+                cursor, request.conversation_id, "assistant", assistant_reply
+            )
+            conn.commit()
 
         return ResponseModel[ChatResponse](
             data=ChatResponse(

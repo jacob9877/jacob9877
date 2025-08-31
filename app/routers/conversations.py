@@ -2,6 +2,7 @@ import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from mysql.connector import MySQLConnection
+from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
@@ -16,7 +17,7 @@ from app.utils.db import (
     get_db_connection,
 )
 from app.utils.jwt import get_and_validate_current_user_id
-from app.utils.llm import get_conversation_history, get_gemini_title
+from app.utils.llm import get_gemini_title
 
 router = APIRouter(
     prefix="/conversations",
@@ -92,6 +93,22 @@ def start_conversation(
         raise e
 
 
+def _get_conversation_history(
+    cursor: MySQLCursorDict, conversation_id: int
+) -> list[Message]:
+    operation = """
+        SELECT role, content
+        FROM messages
+        WHERE conversation_id = %s
+        ORDER BY message_order ASC, id ASC
+    """
+    params = (conversation_id,)
+    cursor.execute(operation, params)
+
+    rows = cursor.fetchall()
+    return [Message(**row) for row in rows]
+
+
 @router.get(
     "/{conversation_id}",
     summary="Get all messages in a conversation",
@@ -132,7 +149,7 @@ def get_conversation(
                     detail=f"Not authorized to access conversation with ID {conversation_id}",
                 )
 
-        messages = get_conversation_history(conversation)
+            messages = _get_conversation_history(cursor, conversation_id)
 
         return ResponseModel[list[Message]](
             data=messages, detail="Conversation fetched successfully"
