@@ -277,7 +277,12 @@ def get_conversation_history(conversation: Conversation) -> list[Message]:
     with PyMySQLSaver.from_conn_string(
         f"mysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     ) as saver:
+
+        saver.setup()
+
         snapshot = saver.get(config)
+
+        print(snapshot)
 
     messages = []
     for message in snapshot["channel_values"].get("messages", []):
