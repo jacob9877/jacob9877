@@ -242,7 +242,7 @@ def get_chat_response(conversation: Conversation, user_message: str) -> str:
     config = build_config(conversation)
 
     with PyMySQLSaver.from_conn_string(
-        f"mysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     ) as saver:
 
         prompt = SYSTEM_PROMPT
@@ -275,10 +275,8 @@ def get_conversation_history(conversation: Conversation) -> list[Message]:
     config = build_config(conversation)
 
     with PyMySQLSaver.from_conn_string(
-        f"mysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     ) as saver:
-
-        saver.setup()
 
         snapshot = saver.get(config)
 
@@ -307,4 +305,5 @@ def get_gemini_title(message: str) -> str:
 
     messages = [("system", TITLE_SYSTEM_PROMPT), ("human", message)]
     response = model.invoke(messages)
+    return response.content
     return response.content
