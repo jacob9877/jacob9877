@@ -174,7 +174,9 @@ def get_conversation(
 )
 def get_user_conversations(
     conn: MySQLConnection = Depends(get_db_connection),
-    patient_id: int = Query(description="Patient ID to filter conversations by"),
+    patient_id: int | None = Query(
+        default=None, description="Patient ID to filter conversations by"
+    ),
     current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
     try:
