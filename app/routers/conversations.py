@@ -182,10 +182,10 @@ def get_user_conversations(
     try:
         with conn.cursor(dictionary=True) as cursor:
 
-            operation = """
+            operation = f"""
                 SELECT id, title, patient_id
                 FROM conversations
-                WHERE user_id = %s AND patient_id = %s
+                WHERE user_id = %s {"AND patient_id = %s" if patient_id else ""}
                 ORDER BY updated_at DESC, id DESC
             """
             params = (current_user_id, patient_id)
