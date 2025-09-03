@@ -188,7 +188,7 @@ def get_user_conversations(
                 WHERE user_id = %s {"AND patient_id = %s" if patient_id else ""}
                 ORDER BY updated_at DESC, id DESC
             """
-            params = (current_user_id, patient_id)
+            params = (current_user_id, patient_id) if patient_id else (current_user_id,)
             cursor.execute(operation, params)
 
             rows = cursor.fetchall()
