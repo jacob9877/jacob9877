@@ -114,7 +114,7 @@ def _get_conversation_history(
     "/{conversation_id}",
     summary="Get all messages in a conversation",
     description="Get all messages for the conversation with the provided ID",
-    response_model=ResponseModel[list[Message]],
+    response_model=ResponseModel[GetConversationResponse],
     response_description="Messages in the conversation sorted by timestamp",
     status_code=status.HTTP_200_OK,
     responses={
