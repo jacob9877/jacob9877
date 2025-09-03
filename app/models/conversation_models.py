@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.models.chat_models import Message
+
 
 class ConversationSummary(BaseModel):
     id: int
@@ -26,3 +28,8 @@ class StartConversationRequest(BaseModel):
 class StartConversationResponse(BaseModel):
     conversation_id: int
     conversation_title: str
+
+
+class GetConversationResponse(BaseModel):
+    messages: list[Message]
+    patient_id: int | None = None

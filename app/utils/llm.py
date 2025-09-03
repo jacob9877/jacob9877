@@ -70,10 +70,10 @@ GENERAL INFORMATION:
 """
 
 SYSTEM_PROMPT = f"""
-You are a specialized medical AI assistant focused on breast cancer named Barry. You have access to comprehensive information about breast cancer and a prediction model that analyzes tumor features to predict malignancy.
+You are a specialized medical AI agent focused on breast cancer named Barry. You have access to comprehensive information about breast cancer and tools to gain information about patients.
 
 IMPORTANT INSTRUCTIONS:
-1. Always prioritize information from the provided knowledge base
+1. Always prioritize information from the provided knowledge base and that can be obtained from the tools provided to you.
 2. If the question is answered in the knowledge base, reference that information
 3. If the question is not fully covered in the knowledge base, use your general medical knowledge but clearly indicate this
 4. Always recommend consulting with healthcare providers for personalized medical advice
@@ -247,7 +247,7 @@ def get_chat_response(conversation: Conversation, user_message: str) -> str:
 
         prompt = SYSTEM_PROMPT
         if conversation.patient_id:
-            prompt += f"You are chatting with a doctor about breast cancer patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate with the patient id. If they ask any questions related to a patient assume it is about the patient with ID {conversation.patient_id}."
+            prompt += f"You are chatting with a doctor about breast cancer patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate with this patient id. If they ask any questions related to a patient assume it is about the patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
 
         agent = create_react_agent(
             model=model,
@@ -305,5 +305,6 @@ def get_gemini_title(message: str) -> str:
 
     messages = [("system", TITLE_SYSTEM_PROMPT), ("human", message)]
     response = model.invoke(messages)
+    return response.content
     return response.content
     return response.content

@@ -1,6 +1,6 @@
 import traceback
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursorDict
 
@@ -8,6 +8,7 @@ from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import (
     ConversationSummary,
+    GetConversationResponse,
     StartConversationRequest,
     StartConversationResponse,
 )
@@ -151,8 +152,11 @@ def get_conversation(
 
             messages = _get_conversation_history(cursor, conversation_id)
 
-        return ResponseModel[list[Message]](
-            data=messages, detail="Conversation fetched successfully"
+        return ResponseModel[GetConversationResponse](
+            data=GetConversationResponse(
+                messages=messages, patient_id=conversation.patient_id
+            ),
+            detail="Conversation fetched successfully",
         )
 
     except Exception as e:
@@ -170,6 +174,7 @@ def get_conversation(
 )
 def get_user_conversations(
     conn: MySQLConnection = Depends(get_db_connection),
+    patient_id: int = Query(description="Patient ID to filter conversations by"),
     current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
     try:
@@ -178,10 +183,10 @@ def get_user_conversations(
             operation = """
                 SELECT id, title, patient_id
                 FROM conversations
-                WHERE user_id = %s
+                WHERE user_id = %s AND patient_id = %s
                 ORDER BY updated_at DESC, id DESC
             """
-            params = (current_user_id,)
+            params = (current_user_id, patient_id)
             cursor.execute(operation, params)
 
             rows = cursor.fetchall()
