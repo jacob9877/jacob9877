@@ -110,8 +110,8 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
     - Generates a reset token (valid 15 mins).
     - Sends reset link to user's email.
     """,
-    response_model=ResponseModel[dict],
-    response_description="Returns a confirmation message",
+    response_model=ResponseModel[None],
+    response_description="Returns a confirmation message as detail; not significant",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_404_NOT_FOUND: {
@@ -141,8 +141,7 @@ async def request_password_reset(
         token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
 
         await send_reset_email(data.email, token)
-        return ResponseModel[dict](
-            data={"message": "Password reset link sent to your email"},
+        return ResponseModel[None](
             detail="Password reset email sent",
         )
     except Exception as e:
@@ -172,8 +171,8 @@ async def request_password_reset(
     - Updates the user’s password in DB (hashed).
     - Returns confirmation on success.
     """,
-    response_model=ResponseModel[dict],
-    response_description="Returns confirmation of password reset",
+    response_model=ResponseModel[None],
+    response_description="Return is not meaningful; status code indicates success of password reset",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_400_BAD_REQUEST: {
@@ -207,8 +206,7 @@ def reset_password(
             )
         conn.commit()
 
-        return ResponseModel[dict](
-            data={"message": "Password reset successfully"},
+        return ResponseModel[None](
             detail="Password has been reset successfully",
         )
     except jwt.ExpiredSignatureError:
