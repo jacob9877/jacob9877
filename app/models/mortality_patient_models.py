@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from app.models.common_models import PaginatedResults
 
@@ -84,8 +84,6 @@ class MortalityPatientFeatures(BaseModel):
         gt=0,
         example=137.0,
     )
-
-    model_config = ConfigDict(extra="allow")
 
 
 class AddMortalityPatientsRequest(BaseModel):

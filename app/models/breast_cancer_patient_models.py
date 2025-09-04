@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from app.models.common_models import PaginatedResults
 
@@ -12,8 +12,6 @@ class BreastCancerPatientFeatures(BaseModel):
     mean_perimeter: float = Field(..., gt=0, example=87.46)
     mean_area: float = Field(..., gt=0, example=566.3)
     mean_smoothness: float = Field(..., gt=0, example=0.09779)
-
-    model_config = ConfigDict(extra="allow")
 
 
 FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
