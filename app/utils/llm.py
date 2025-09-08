@@ -281,8 +281,3 @@ def get_gemini_title(message: str) -> str:
     messages = [("system", TITLE_SYSTEM_PROMPT), ("human", message)]
     response = model.invoke(messages)
     return response.content
-    response = model.invoke(messages)
-    return response.content
-    return response.content
-    return response.content
-    return response.content

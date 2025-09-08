@@ -1,5 +1,3 @@
-import json
-import os
 import traceback
 from datetime import datetime
 from typing import Literal, Optional
@@ -9,7 +7,6 @@ from fastapi import (
     Body,
     Depends,
     File,
-    Form,
     HTTPException,
     Path,
     Query,
@@ -27,7 +24,6 @@ from app.models.mortality_patient_models import (
     PaginatedMortalityPatients,
     UpdateMortalityPatientRequest,
 )
-from app.models.user_models import User
 from app.utils.aws import get_predictions
 from app.utils.db import get_db_connection, get_mortality_patient_by_id
 from app.utils.file_parser import parse_csv
@@ -36,7 +32,7 @@ from app.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(
     prefix="/mortality-patients",
-    tags=["mortality-patients"],
+    tags=["Mortality Patients"],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],

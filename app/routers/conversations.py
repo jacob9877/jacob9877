@@ -13,16 +13,16 @@ from app.models.conversation_models import (
     StartConversationResponse,
 )
 from app.utils.db import (
+    get_breast_cancer_conversation_by_id,
     get_breast_cancer_patient_by_id,
-    get_conversation_by_id,
     get_db_connection,
 )
 from app.utils.jwt import get_and_validate_current_user_id
 from app.utils.llm import get_gemini_title
 
 router = APIRouter(
-    prefix="/conversations",
-    tags=["conversations"],
+    prefix="/breast-cancer-conversations",
+    tags=["Breast Cancer Conversations"],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],
@@ -34,7 +34,7 @@ router = APIRouter(
 
 @router.post(
     "",
-    summary="Create a conversation",
+    summary="Create a conversation about breast cancer",
     description="",
     response_model=ResponseModel[StartConversationResponse],
     response_description="ID of the newly created conversation and the title",
@@ -73,7 +73,7 @@ def start_conversation(
 
             conversation_title = get_gemini_title(request.user_message)
             operation = """
-                INSERT INTO conversations (user_id, patient_id, title)
+                INSERT INTO breast_cancer_conversations (user_id, patient_id, title)
                 VALUES (%s, %s, %s)
             """
             params = (current_user_id, request.patient_id, conversation_title)
@@ -99,7 +99,7 @@ def _get_conversation_history(
 ) -> list[Message]:
     operation = """
         SELECT role, content
-        FROM messages
+        FROM breast_cancer_messages
         WHERE conversation_id = %s
         ORDER BY message_order ASC, id ASC
     """
@@ -112,7 +112,7 @@ def _get_conversation_history(
 
 @router.get(
     "/{conversation_id}",
-    summary="Get all messages in a conversation",
+    summary="Get all messages in a breast cancer conversation",
     description="Get all messages for the conversation with the provided ID",
     response_model=ResponseModel[GetConversationResponse],
     response_description="Messages in the conversation sorted by timestamp",
@@ -138,7 +138,7 @@ def get_conversation(
     try:
         with conn.cursor(dictionary=True) as cursor:
 
-            conversation = get_conversation_by_id(cursor, conversation_id)
+            conversation = get_breast_cancer_conversation_by_id(cursor, conversation_id)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -184,7 +184,7 @@ def get_user_conversations(
 
             operation = f"""
                 SELECT id, title, patient_id
-                FROM conversations
+                FROM breast_cancer_conversations
                 WHERE user_id = %s {"AND patient_id = %s" if patient_id else ""}
                 ORDER BY updated_at DESC, id DESC
             """

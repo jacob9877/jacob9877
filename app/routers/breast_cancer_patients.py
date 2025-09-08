@@ -35,7 +35,7 @@ from app.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(
     prefix="/breast-cancer-patients",
-    tags=["breast-cancer-patients"],
+    tags=["Breast Cancer Patients"],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],

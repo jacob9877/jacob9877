@@ -23,7 +23,7 @@ from app.utils.jwt import (
     set_refresh_cookie,
 )
 
-router = APIRouter(prefix="/auth", tags=["/auth"])
+router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post(

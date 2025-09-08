@@ -6,13 +6,13 @@ from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
-from app.utils.db import get_conversation_by_id, get_db_connection
+from app.utils.db import get_breast_cancer_conversation_by_id, get_db_connection
 from app.utils.jwt import get_and_validate_current_user_id
 from app.utils.llm import get_chat_response
 
 router = APIRouter(
-    prefix="/chat",
-    tags=["chat"],
+    prefix="/breast-cancer-chat",
+    tags=["Breast Cancer Chat"],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],
@@ -26,9 +26,9 @@ def _insert_message(
     cursor: MySQLCursorDict, conversation_id: int, role: str, content: str
 ):
     operation = """
-        INSERT INTO messages (conversation_id, role, content, message_order)
+        INSERT INTO breast_cancer_messages (conversation_id, role, content, message_order)
         SELECT %s, %s, %s, COALESCE(MAX(message_order), 0) + 1
-        FROM messages
+        FROM breast_cancer_messages
         WHERE conversation_id = %s
     """
     params = (conversation_id, role, content, conversation_id)
@@ -61,7 +61,9 @@ def chat_agent(
     try:
         with conn.cursor(dictionary=True) as cursor:
 
-            conversation = get_conversation_by_id(cursor, request.conversation_id)
+            conversation = get_breast_cancer_conversation_by_id(
+                cursor, request.conversation_id
+            )
 
             # User provided a conversation ID but it doesn't exist
             if request.conversation_id and not conversation:

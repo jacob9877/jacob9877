@@ -20,7 +20,7 @@ from app.utils.email_utils import send_reset_email
 SECRET_KEY = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = os.environ["JWT_ALGORITHM"]
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.post(
