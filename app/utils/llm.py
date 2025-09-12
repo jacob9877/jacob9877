@@ -221,7 +221,7 @@ def get_chat_response(conversation: Conversation, user_message: str) -> str:
 
         prompt = SYSTEM_PROMPT
         if conversation.patient_id:
-            prompt += f"You are chatting with a doctor about breast cancer patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
+            prompt += f"You are chatting with a doctor about breast cancer patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
 
         agent = create_react_agent(
             model=model,
@@ -280,4 +280,5 @@ def get_gemini_title(message: str) -> str:
 
     messages = [("system", TITLE_SYSTEM_PROMPT), ("human", message)]
     response = model.invoke(messages)
+    return response.content
     return response.content
