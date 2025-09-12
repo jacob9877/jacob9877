@@ -1,21 +1,16 @@
-import json
 import os
-import sys
 
 import mysql.connector
 from dotenv import find_dotenv, load_dotenv
 from fastapi import HTTPException, status
 from langchain.chat_models import init_chat_model
-from langchain_core.messages.ai import AIMessage
-from langchain_core.messages.human import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.models.breast_cancer_patient_models import FEATURE_NAMES, BreastCancerPatient
-from app.models.chat_models import Message
+from app.models.breast_cancer_patient_models import FEATURE_NAMES
 from app.models.conversation_models import Conversation
 from app.utils.db import get_breast_cancer_patient_by_id
 
@@ -245,28 +240,6 @@ def get_chat_response(conversation: Conversation, user_message: str) -> str:
         return ai_message
 
 
-# This function doesnt really work
-def get_conversation_history(conversation: Conversation) -> list[Message]:
-    config = build_config(conversation)
-
-    with PyMySQLSaver.from_conn_string(
-        f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    ) as saver:
-
-        snapshot = saver.get(config)
-
-        print(snapshot)
-
-    messages = []
-    for message in snapshot["channel_values"].get("messages", []):
-        if isinstance(message, AIMessage) and message.content != "":
-            messages.append(Message(role="assistant", content=message.content))
-        elif isinstance(message, HumanMessage):
-            messages.append(Message(role="user", content=message.content))
-
-    return messages
-
-
 TITLE_SYSTEM_PROMPT = """
 You are an expert in creating concise but expressive titles.
 You will create titles for a chatbot where users can have multiple conversations.
@@ -280,5 +253,4 @@ def get_gemini_title(message: str) -> str:
 
     messages = [("system", TITLE_SYSTEM_PROMPT), ("human", message)]
     response = model.invoke(messages)
-    return response.content
     return response.content
