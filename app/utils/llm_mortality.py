@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.models.breast_cancer_patient_models import FEATURE_NAMES
 from app.models.conversation_models import Conversation
-from app.utils.db import get_breast_cancer_patient_by_id
+from app.utils.db import get_mortality_patient_by_id
 
 load_dotenv(find_dotenv(), override=True)
 
