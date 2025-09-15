@@ -9,17 +9,37 @@
 5. Install the dependencies by running the command `pip install -r requirements.txt` in the `api` directory.
 6. Make sure the `.env` file is present in the `api` directory. In its file content, it must include the following environment variables:
 
-- AWS_ACCESS_KEY_ID=...
-- AWS_SECRET_ACCESS_KEY=...
-- AWS_DEFAULT_REGION=...
-- DB_HOST=...
-- DB_NAME=...
-- DB_PASSWORD=...
-- DB_PORT=...
-- DB_USER=...
-- GOOGLE_API_KEY=...
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=
+SAGEMAKER_ROLE=
+S3_MODELS_BUCKET=
+DB_HOST=
+DB_PORT=
+DB_USER=
+DB_PASSWORD=
+DB_NAME=
+GOOGLE_API_KEY=
+JWT_SECRET=
+JWT_ALGORITHM=
+MAIL_USERNAME=
+MAIL_PASSWORD=
+MAIL_FROM=
+MAIL_PORT=
+MAIL_SERVER=
+FRONTEND_URL=
+BREAST_CANCER_EXPLANATION_QUEUE_URL=
+ACCESS_TOKEN_TTL_SECONDS=
+REFRESH_TOKEN_TTL_SECONDS=6
 
 ## Running the API
 
 In the `api` directory, run `fastapi dev app/app.py`.
 Once you see `Application startup complete`, good to go! You can send requests to `http://127.0.0.1:8000`.
+
+## Testing the API
+
+Go to `http://127.0.0.1:8000/docs` \
+Use `/auth/login` with your credentials to get an access token \
+Click the "Authorize" button at the top of the docs and insert this access token \
+Now all subsequent requests will use this access token, and go to go!

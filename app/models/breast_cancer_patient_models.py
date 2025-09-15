@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
-from typing_extensions import Self
+from pydantic import BaseModel, Field
+
+from app.models.common_models import PaginatedResults
 
 
 class BreastCancerPatientFeatures(BaseModel):
@@ -17,9 +18,6 @@ FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
 
 
 class AddBreastCancerPatientsRequest(BaseModel):
-    user_id: int = Field(
-        ..., description="ID of the user adding the patients", example=1
-    )
     patients: list[BreastCancerPatientFeatures] = Field(
         ..., min_items=1, description="List of breast cancer patients to add"
     )
@@ -104,3 +102,7 @@ class UpdateBreastCancerPatientRequest(BaseModel):
     mean_perimeter: Optional[float] = Field(default=None, gt=0, example=87.46)
     mean_area: Optional[float] = Field(default=None, gt=0, example=566.3)
     mean_smoothness: Optional[float] = Field(default=None, gt=0, example=0.09779)
+
+
+class PaginatedBreastCancerPatients(PaginatedResults):
+    patients: list[BreastCancerPatient]
