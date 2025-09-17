@@ -80,8 +80,11 @@ def _add_patients(
         list(patient.model_dump(exclude={"user_id"}).values())
         for patient in add_patients_request.patients
     ]
-    diagnoses = get_predictions({"instances": instances}, SAGEMAKER_ENDPOINT_NAME)
-
+    result = get_predictions({"instances": instances}, SAGEMAKER_ENDPOINT_NAME)
+    diagnoses = [
+        prediction[0] if isinstance(prediction, list) else prediction
+        for prediction in result["predictions"]
+    ]
     assert len(diagnoses) == len(
         add_patients_request.patients
     ), "Mismatch between number of patients and diagnoses"

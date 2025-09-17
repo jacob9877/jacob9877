@@ -8,10 +8,12 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 
+from app.models.pediatric_appendicitis_models import MIME_TYPE_MAPPINGS
+
 ATTEMPTS = 4
 
 
-def get_predictions(body: dict, sagemaker_endpoint_name) -> list[Literal[0, 1]]:
+def get_predictions(body: dict, sagemaker_endpoint_name) -> dict:
     sagemaker_client = boto3.client(
         "sagemaker-runtime",
         config=Config(retries={"max_attempts": ATTEMPTS, "mode": "standard"}),
@@ -40,11 +42,7 @@ def get_predictions(body: dict, sagemaker_endpoint_name) -> list[Literal[0, 1]]:
             )  # Exponential backoff with max of 16 seconds delay
 
     result = json.loads(result_raw)
-    predictions = [
-        prediction[0] if isinstance(prediction, list) else prediction
-        for prediction in result["predictions"]
-    ]
-    return predictions
+    return result
 
 
 def bulk_send_message_to_sqs(queue_url: str, messages: list[dict]) -> None:
@@ -80,10 +78,13 @@ def create_presigned_url(
 def create_presigned_post(
     bucket: str,
     key: str,
-    content_type: str,
+    file_type: str,
     max_size_in_bytes: int,
     expires_in_sec: int = 60,
 ):
+    content_type = MIME_TYPE_MAPPINGS.get(file_type)
+    if not content_type:
+        raise ValueError(f"Unsupported file type: {file_type}")
 
     s3 = boto3.client("s3")
 
@@ -120,4 +121,5 @@ def s3_file_exists(bucket: str, key: str):
         else:
             # Handle other potential errors (e.g., permissions)
             print(f"An error occurred: {e}")
+            raise
             raise
