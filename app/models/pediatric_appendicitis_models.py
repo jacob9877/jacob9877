@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.common_models import PaginatedResults
 
@@ -19,10 +19,21 @@ class CreateImagesRequest(BaseModel):
     ]  # List of accepted image file types
 
 
+class PresignedPostFields(BaseModel):
+    key: str
+    Content_Type: str
+    AWSAccessKeyId: str
+    policy: str
+    signature: str
+
+    class Config:
+        extra = "ignore"
+
+
 class PresignedUpload(BaseModel):
     upload_id: str
     url: str
-    fields: dict
+    fields: PresignedPostFields
 
 
 class PediatricAppendicitisPatientFeatures(BaseModel):
