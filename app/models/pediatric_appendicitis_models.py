@@ -111,4 +111,4 @@ class S3Uri(BaseModel):
 
 
 class PaginatedPediatricAppendicitisPatients(PaginatedResults):
-    results: list[PediatricAppendicitisPatient]
+    patients: list[PediatricAppendicitisPatient]
