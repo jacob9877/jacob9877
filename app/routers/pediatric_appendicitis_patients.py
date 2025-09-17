@@ -1,8 +1,9 @@
 import traceback
 import uuid
-from typing import Literal
+from datetime import datetime
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursorDict
 from pydantic import BaseModel
@@ -11,6 +12,7 @@ from app.models.common_models import ResponseModel
 from app.models.pediatric_appendicitis_models import (
     AddPediatricAppendicitisPatientRequest,
     CreateImagesRequest,
+    PaginatedPediatricAppendicitisPatients,
     PediatricAppendicitisPatient,
     PediatricAppendicitisPatientFeatures,
     PediatricAppendicitisPatientWithImages,
@@ -25,6 +27,7 @@ from app.utils.aws import (
 )
 from app.utils.db import get_db_connection, get_pediatric_appendicitis_patient_by_id
 from app.utils.jwt import get_and_validate_current_user_id
+from app.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(
     prefix="/pediatric-appendicitis-patients",
@@ -227,12 +230,96 @@ def get_patient(
 
 @router.get(
     "",
-    summary="Get patients for the logged-in user",
-    description="Returns a paginated list of patients (only features and predictions provided, no images)",
+    summary="Get pediatric appendicitis patients for the logged-in user (cursor-based pagination)",
+    description=(
+        "Retrieves pediatric appendicitis patients for the current user (by the provided access token) using cursor-based pagination, "
+        "sorted by most recently updated."
+    ),
+    response_model=ResponseModel[PaginatedPediatricAppendicitisPatients],
+    response_description="Returns a page of patients plus a next_cursor if more data exists",
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Cursor is invalid",
+        }
+    },
 )
-def get_patients():
-    # Get the patients for the logged in user
-    # Dont worry about the images
-    # PAGINATE!
-    return
+def get_pediatric_appendicitis_patients_paginated(
+    # Optional cursor from previous response
+    cursor_token: Optional[str] = Query(
+        default=None,
+        alias="cursor",
+        description="Opaque cursor returned from the previous page (base64url)",
+    ),
+    limit: int = Query(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max number of patients to return (1–100)",
+    ),
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        # Order is (updated_at DESC, id DESC).
+        # For "next page", fetch rows strictly "after" the cursor in that order:
+        # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
+        operation = """
+            SELECT *
+            FROM pediatric_appendicitis_patients
+            WHERE user_id = %s
+        """
+
+        params = [current_user_id]
+
+        if cursor_token:
+            try:
+                last_timestamp, last_id = decode_cursor(cursor_token)
+            except:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
+                )
+            operation += """
+                AND (
+                    updated_at < %s
+                    OR (updated_at = %s AND id < %s)
+                )
+            """
+            params.extend([last_timestamp, last_timestamp, last_id])
+
+        # Apply ORDER BY and LIMIT + 1 (to see if there's another page)
+        operation += " ORDER BY updated_at DESC, id DESC LIMIT %s"
+        params.append(limit + 1)
+
+        with conn.cursor(dictionary=True) as cursor:
+
+            cursor.execute(operation, tuple(params))
+            rows = cursor.fetchall()
+
+        # Build response items and next cursor (if we fetched limit+1)
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]  # only return 'limit' items
+
+        patients = [PediatricAppendicitisPatient(**row) for row in rows]
+
+        next_cursor: Optional[str] = None
+        if has_more and rows:
+            last_row = rows[-1]
+            last_updated_at: datetime = last_row["updated_at"]
+            last_row_id: int = last_row["id"]
+            next_cursor = encode_cursor(last_updated_at, last_row_id)
+
+        paginated_patients = PaginatedPediatricAppendicitisPatients(
+            next_cursor=next_cursor,
+            patients=patients,
+        )
+        return ResponseModel[PaginatedPediatricAppendicitisPatients](
+            data=paginated_patients,
+            detail="Patients retrieved successfully",
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        raise e

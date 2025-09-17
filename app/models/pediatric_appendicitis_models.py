@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.common_models import PaginatedResults
+
 
 class CreateImagesRequest(BaseModel):
     file_types: list[
@@ -81,3 +83,7 @@ class AddPediatricAppendicitisPatientRequest(BaseModel):
 class S3Uri(BaseModel):
     bucket: str
     key: str
+
+
+class PaginatedPediatricAppendicitisPatients(PaginatedResults):
+    results: list[PediatricAppendicitisPatient]
