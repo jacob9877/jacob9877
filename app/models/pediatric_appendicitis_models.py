@@ -61,6 +61,7 @@ class PediatricAppendicitisPatientFeatures(BaseModel):
 
 class PediatricAppendicitisPatient(PediatricAppendicitisPatientFeatures):
     id: int
+    user_id: int
     diagnosis: Literal["appendicitis", "no appendicitis"]
     management: Literal["conservative", "surgical"]
     severity: Literal["complicated", "uncomplicated"]
