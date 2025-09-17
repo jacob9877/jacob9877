@@ -78,7 +78,7 @@ def _add_patients(
         list(patient.model_dump(exclude={"user_id"}).values())
         for patient in add_patients_request.patients
     ]
-    diagnoses = get_predictions(instances, SAGEMAKER_ENDPOINT_NAME)
+    diagnoses = get_predictions({"instances": instances}, SAGEMAKER_ENDPOINT_NAME)
 
     assert len(diagnoses) == len(
         add_patients_request.patients
