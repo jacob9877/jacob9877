@@ -8,6 +8,7 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.breast_cancer_patient_models import BreastCancerPatient
 from app.models.conversation_models import Conversation
 from app.models.mortality_patient_models import MortalityPatient
+from app.models.pediatric_appendicitis_models import PediatricAppendicitisPatient
 from app.models.user_models import User
 
 
@@ -95,3 +96,19 @@ def get_mortality_patient_by_id(
     if row is None:
         return None
     return MortalityPatient(**row)
+
+
+def get_pediatric_appendicitis_patient_by_id(
+    cursor: MySQLCursorDict, patient_id: int
+) -> PediatricAppendicitisPatient | None:
+    operation = """
+        SELECT *
+        FROM pediatric_appendicitis_patients
+        WHERE id = %s
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return PediatricAppendicitisPatient(**row)

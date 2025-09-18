@@ -5,14 +5,15 @@ from typing import Literal
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
+
+from app.models.pediatric_appendicitis_models import MIME_TYPE_MAPPINGS
 
 ATTEMPTS = 4
 
 
-def get_predictions(
-    instances: list[list[float]], sagemaker_endpoint_name
-) -> list[Literal[0, 1]]:
+def get_predictions(body: dict, sagemaker_endpoint_name) -> dict:
     sagemaker_client = boto3.client(
         "sagemaker-runtime",
         config=Config(retries={"max_attempts": ATTEMPTS, "mode": "standard"}),
@@ -24,7 +25,7 @@ def get_predictions(
             response = sagemaker_client.invoke_endpoint(
                 EndpointName=sagemaker_endpoint_name,
                 ContentType="application/json",
-                Body=json.dumps({"instances": instances}),
+                Body=json.dumps(body),
             )
             result_raw = response["Body"].read().decode("utf-8")
         except sagemaker_client.exceptions.ModelNotReadyException:
@@ -41,11 +42,7 @@ def get_predictions(
             )  # Exponential backoff with max of 16 seconds delay
 
     result = json.loads(result_raw)
-    predictions = [
-        prediction[0] if isinstance(prediction, list) else prediction
-        for prediction in result["predictions"]
-    ]
-    return predictions
+    return result
 
 
 def bulk_send_message_to_sqs(queue_url: str, messages: list[dict]) -> None:
@@ -60,3 +57,69 @@ def bulk_send_message_to_sqs(queue_url: str, messages: list[dict]) -> None:
         ]
 
         sqs.send_message_batch(QueueUrl=queue_url, Entries=entries)
+
+
+def create_presigned_url(
+    bucket: str, key: str, expires_in_sec: int | None = 3600
+) -> str:
+
+    # Generate a presigned URL for the S3 object
+    s3_client = boto3.client("s3")
+    response = s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires_in_sec,
+    )
+
+    # The response contains the presigned URL
+    return response
+
+
+def create_presigned_post(
+    bucket: str,
+    key: str,
+    file_type: str,
+    max_size_in_bytes: int,
+    expires_in_sec: int = 60,
+):
+    content_type = MIME_TYPE_MAPPINGS.get(file_type)
+    if not content_type:
+        raise ValueError(f"Unsupported file type: {file_type}")
+
+    s3 = boto3.client("s3")
+
+    fields = {
+        "key": key,
+        "Content-Type": content_type,
+    }
+    conditions = [
+        {"bucket": bucket},
+        {"key": key},
+        {"Content-Type": content_type},
+        ["content-length-range", 0, max_size_in_bytes],
+    ]
+
+    response = s3.generate_presigned_post(
+        Bucket=bucket,
+        Key=key,
+        Fields=fields,
+        Conditions=conditions,
+        ExpiresIn=expires_in_sec,
+    )
+
+    return response
+
+
+def s3_file_exists(bucket: str, key: str):
+    s3 = boto3.client("s3")
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        else:
+            # Handle other potential errors (e.g., permissions)
+            print(f"An error occurred: {e}")
+            raise
+            raise

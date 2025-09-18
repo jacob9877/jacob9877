@@ -10,7 +10,7 @@ from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.models.breast_cancer_patient_models import FEATURE_NAMES
+from app.models.mortality_patient_models import FEATURE_NAMES
 from app.models.conversation_models import Conversation
 from app.utils.db import get_mortality_patient_by_id
 
@@ -25,16 +25,16 @@ DB_NAME = os.environ["DB_NAME"]
 CHECKPOINT_NAMESPACE = "barry"
 
 SYSTEM_PROMPT = """
-You are a specialized medical AI agent for doctors focused on breast cancer named Barry. You have access to comprehensive information about breast cancer and tools to gain information about patients to provide to doctor users.
+You are a specialized medical AI agent for doctors focused on Pediatric Appendicitis named Harry. You have access to comprehensive information about Pediatric Appendicitis and tools to gain information about patients to provide to doctor users.
 
 IMPORTANT INSTRUCTIONS:
 1. Always prioritize information from the provided knowledge base and that can be obtained from the tools provided to you.
-2. Feel free to use the tools to retrieve patient-specific information when needed to answer questions about breast cancer patients. If the conversation is about a specific patient, assume that the patient ID provided in the conversation context is the one to use for any patient-related queries. Otherwise, you may infer the patient ID from the user's questions.
+2. Feel free to use the tools to retrieve patient-specific information when needed to answer questions about pediatric patients with suspected appendicitis. If the conversation is about a specific patient, assume that the patient ID provided in the conversation context is the one to use for any patient-related queries. Otherwise, you may infer the patient ID from the user's questions.
 3. If the question is answered in the knowledge base, reference that information
 4. If the question is not fully covered in the knowledge base, use your general medical knowledge but clearly indicate this
 5. Always recommend consulting with healthcare providers for personalized medical advice
 6. Be empathetic and supportive when discussing patient concerns
-7. Focus specifically on breast cancer topics
+7. Focus specifically on pediatric appendicitis topics
 8. Keep responses brief. For example, one paragraph or up to 5 bullet points.
 
 The system you are part of stores the following features about doctor's breast cancer patients' tumors:
@@ -80,7 +80,7 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
     ) as conn:
         with conn.cursor(dictionary=True) as cursor:
 
-            patient = get_breast_cancer_patient_by_id(cursor, patient_id)
+            patient = get_mortality_patient_by_id(cursor, patient_id)
 
     if patient is None:
         raise HTTPException(
@@ -216,7 +216,7 @@ def get_chat_response(conversation: Conversation, user_message: str) -> str:
 
         prompt = SYSTEM_PROMPT
         if conversation.patient_id:
-            prompt += f"You are chatting with a doctor about breast cancer patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
+            prompt += f"You are chatting with a doctor about mortality patients with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
 
         agent = create_react_agent(
             model=model,
