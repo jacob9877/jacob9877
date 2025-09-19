@@ -20,7 +20,7 @@ class CreateImagesRequest(BaseModel):
 
 class PresignedPostFields(BaseModel):
     key: str
-    Content_Type: str
+    Content_Type: str = Field(example="image/bmp")
     AWSAccessKeyId: str
     policy: str
     signature: str
@@ -30,8 +30,10 @@ class PresignedPostFields(BaseModel):
 
 
 class PresignedUpload(BaseModel):
-    upload_id: str
-    url: str
+    upload_id: str = Field(example="f47ac10b-58cc-4372-a567-0e02b2c3d479")
+    url: str = Field(
+        example="https://pediatric-appendicitis-images.s3.us-east-1.amazonaws.com/"
+    )
     fields: PresignedPostFields
 
 
