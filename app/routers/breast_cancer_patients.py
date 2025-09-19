@@ -2,7 +2,7 @@ import json
 import os
 import traceback
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import (
     APIRouter,
@@ -108,11 +108,7 @@ def _add_patients(
         status.HTTP_400_BAD_REQUEST: {
             "model": ResponseModel[None],
             "description": "CSV is invalid",
-        },
-        status.HTTP_404_NOT_FOUND: {
-            "model": ResponseModel[None],
-            "description": "User not found",
-        },
+        }
     },
 )
 def add_patients_json(
@@ -167,15 +163,11 @@ def add_patients_json(
         status.HTTP_400_BAD_REQUEST: {
             "model": ResponseModel[None],
             "description": "CSV is invalid",
-        },
-        status.HTTP_404_NOT_FOUND: {
-            "model": ResponseModel[None],
-            "description": "User not found",
-        },
+        }
     },
 )
 def add_patients_csv(
-    file: Optional[UploadFile] = File(None),
+    file: UploadFile | None = File(None),
     conn: MySQLConnection = Depends(get_db_connection),
     current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
@@ -288,9 +280,9 @@ def get_patient(
         }
     },
 )
-def get_user_breast_cancer_patients_paginated(
+def get_breast_cancer_patients_paginated(
     # Optional cursor from previous response
-    cursor_token: Optional[str] = Query(
+    cursor_token: str | None = Query(
         default=None,
         alias="cursor",
         description="Opaque cursor returned from the previous page (base64url)",
@@ -347,7 +339,7 @@ def get_user_breast_cancer_patients_paginated(
 
         patients = [BreastCancerPatient(**row) for row in rows]
 
-        next_cursor: Optional[str] = None
+        next_cursor: str | None = None
         if has_more and rows:
             last_row = rows[-1]
             last_updated_at: datetime = last_row["updated_at"]
@@ -372,9 +364,9 @@ def _update_and_repredict(
     *,
     cursor: MySQLCursorDict,
     patient_id: int,
-    partial_update: Optional[
-        UpdateBreastCancerPatientRequest
-    ] = UpdateBreastCancerPatientRequest(),  # None -> repredict-only
+    partial_update: (
+        UpdateBreastCancerPatientRequest | None
+    ) = UpdateBreastCancerPatientRequest(),  # None -> repredict-only
 ) -> BreastCancerPatient:
 
     # Fetch current features

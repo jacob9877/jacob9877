@@ -1,7 +1,6 @@
 import traceback
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from mysql.connector import MySQLConnection
@@ -12,15 +11,17 @@ from app.models.pediatric_appendicitis_models import (
     FEATURE_NAMES,
     AddPediatricAppendicitisPatientRequest,
     CreateImagesRequest,
+    ImageResponse,
     PaginatedPediatricAppendicitisPatients,
     PediatricAppendicitisPatient,
     PediatricAppendicitisPatientFeatures,
     PediatricAppendicitisPatientWithImages,
+    PediatricAppendicitisPredictions,
     PresignedUpload,
     S3Uri,
 )
 from app.utils.aws import (
-    create_presigned_post,
+    create_presigned_post_for_image,
     create_presigned_url,
     get_predictions,
     s3_file_exists,
@@ -41,6 +42,7 @@ router = APIRouter(
 )
 
 IMAGES_BUCKET = "pediatric-appendicitis-images"
+SAGEMAKER_ENDPOINT_NAME = "pediatric-appendicitis"
 
 
 def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
@@ -53,6 +55,7 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
     description="Given a list of file extensions of images to be uploaded, returns a pre-signed URL with additional data for each of them",
     status_code=status.HTTP_201_CREATED,
     response_model=list[PresignedUpload],
+    response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request)",
 )
 def create_presigned_uploads(
     request: CreateImagesRequest,
@@ -64,7 +67,7 @@ def create_presigned_uploads(
             presigned_uploads: list[PresignedUpload] = []
             for file_type in request.file_types:
                 upload_id = str(uuid.uuid4())
-                presigned_url = create_presigned_post(
+                presigned_post_url = create_presigned_post_for_image(
                     bucket=IMAGES_BUCKET,
                     key=build_s3_image_key(current_user_id, upload_id, file_type),
                     file_type=file_type,
@@ -74,8 +77,8 @@ def create_presigned_uploads(
                 presigned_uploads.append(
                     PresignedUpload(
                         upload_id=upload_id,
-                        url=presigned_url["url"],
-                        fields=presigned_url["fields"],
+                        url=presigned_post_url["url"],
+                        fields=presigned_post_url["fields"],
                     )
                 )
 
@@ -96,7 +99,7 @@ def create_presigned_uploads(
         raise e
 
 
-def _get_image_uri(
+def _get_s3_uri_for_upload_id(
     cursor: MySQLCursorDict, upload_id: str, current_user_id: int
 ) -> S3Uri:
     operation = """
@@ -106,11 +109,13 @@ def _get_image_uri(
     params = (upload_id,)
     cursor.execute(operation, params)
     row = cursor.fetchone()
+    # Provided upload_id doesn't actually exist
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Upload ID {upload_id} not found",
         )
+    # Check that the provided upload_id actually belongs to the logged-in user
     if row["user_id"] != current_user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -129,18 +134,13 @@ def _get_image_uri(
 def _insert_patient(
     cursor: MySQLCursorDict,
     user_id: int,
-    patient: PediatricAppendicitisPatientFeatures,
-    predictions: dict,
+    features: PediatricAppendicitisPatientFeatures,
+    predictions: PediatricAppendicitisPredictions,
 ) -> PediatricAppendicitisPatient:
     column_names = [
         "user_id",
         *FEATURE_NAMES,
-        "diagnosis",
-        "management",
-        "severity",
-        "length_of_stay_pred",
-        "length_of_stay_pi_lower",
-        "length_of_stay_pi_upper",
+        *list(PediatricAppendicitisPredictions.model_fields.keys()),
     ]
     placeholders = ", ".join(["%s"] * len(column_names))
     operation = f"""
@@ -149,15 +149,8 @@ def _insert_patient(
     """
     params = tuple(
         [user_id]
-        + [getattr(patient, feature_name) for feature_name in FEATURE_NAMES]
-        + [
-            predictions["diagnosis"],
-            predictions["management"],
-            predictions["severity"],
-            predictions["length_of_stay"]["pred"],
-            predictions["length_of_stay"]["pi_lower"],
-            predictions["length_of_stay"]["pi_upper"],
-        ]
+        + [getattr(features, feature_name) for feature_name in FEATURE_NAMES]
+        + list(predictions.model_dump().values())
     )
     cursor.execute(operation, params)
     patient_id = cursor.lastrowid
@@ -174,7 +167,14 @@ def _insert_patient(
     return PediatricAppendicitisPatient(**row)
 
 
-@router.post("")
+@router.post(
+    "",
+    summary="Add a pediatric appendicitis patient",
+    description="Given the features and upload_ids of any associated images, add and predict for a new pediatric appendicitis patient.",
+    response_model=ResponseModel[PediatricAppendicitisPatientWithImages],
+    response_description="Patient information along with pre-signed URLs for any associated images",
+    status_code=status.HTTP_201_CREATED,
+)
 def add_patient(
     add_patient_request: AddPediatricAppendicitisPatientRequest,
     conn: MySQLConnection = Depends(get_db_connection),
@@ -185,7 +185,7 @@ def add_patient(
         with conn.cursor(dictionary=True) as cursor:
 
             image_s3_uris = [
-                _get_image_uri(cursor, upload_id, current_user_id)
+                _get_s3_uri_for_upload_id(cursor, upload_id, current_user_id)
                 for upload_id in add_patient_request.image_upload_ids
             ]
 
@@ -193,13 +193,13 @@ def add_patient(
                 "features": add_patient_request.features.model_dump(),
                 "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
             }
-            predictions = get_predictions(body, "pediatric-appendicitis")
-
+            predictions = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
+            predictions_validated = PediatricAppendicitisPredictions(**predictions)
             new_patient = _insert_patient(
                 cursor,
                 current_user_id,
                 add_patient_request.features,
-                predictions,
+                predictions_validated,
             )
 
             if add_patient_request.image_upload_ids:
@@ -219,12 +219,15 @@ def add_patient(
                 )
                 cursor.execute(operation, params)
 
-        presigned_urls = [
-            create_presigned_url(uri.bucket, uri.key) for uri in image_s3_uris
-        ]
+        images: list[ImageResponse] = []
+        for upload_id, image_s3_uri in zip(
+            add_patient_request.image_upload_ids, image_s3_uris
+        ):
+            presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
+            images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
 
         patient_with_images = PediatricAppendicitisPatientWithImages(
-            **new_patient.model_dump(), image_urls=presigned_urls
+            **new_patient.model_dump(), images=images
         )
 
         conn.commit()
@@ -279,6 +282,7 @@ def get_patient(
                     detail=f"Not authorized to access this patient",
                 )
 
+            # Fetch any images associated with the patient
             operation = """
                 SELECT upload_id, file_type
                 FROM pediatric_appendicitis_images
@@ -288,16 +292,17 @@ def get_patient(
             cursor.execute(operation, params)
             rows = cursor.fetchall()
 
-        presigned_urls = []
+        # Build upload_id, pre-signed url pairs for each image
+        images: list[ImageResponse] = []
         for row in rows:
             s3_key = build_s3_image_key(
                 current_user_id, row["upload_id"], row["file_type"]
             )
             presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
-            presigned_urls.append(presigned_url)
+            images.append(ImageResponse(upload_id=row["upload_id"], url=presigned_url))
 
         patient_with_images = PediatricAppendicitisPatientWithImages(
-            **patient.model_dump(), image_urls=presigned_urls
+            **patient.model_dump(), images=images
         )
 
         return ResponseModel[PediatricAppendicitisPatientWithImages](
@@ -329,7 +334,7 @@ def get_patient(
 )
 def get_pediatric_appendicitis_patients_paginated(
     # Optional cursor from previous response
-    cursor_token: Optional[str] = Query(
+    cursor_token: str | None = Query(
         default=None,
         alias="cursor",
         description="Opaque cursor returned from the previous page (base64url)",
@@ -386,7 +391,7 @@ def get_pediatric_appendicitis_patients_paginated(
 
         patients = [PediatricAppendicitisPatient(**row) for row in rows]
 
-        next_cursor: Optional[str] = None
+        next_cursor: str | None = None
         if has_more and rows:
             last_row = rows[-1]
             last_updated_at: datetime = last_row["updated_at"]

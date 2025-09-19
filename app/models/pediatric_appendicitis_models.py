@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.common_models import PaginatedResults
 
+ACCEPTED_IMAGE_TYPES = Literal["jpg", "jpeg", "png", "bmp"]
 MIME_TYPE_MAPPINGS = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
@@ -14,9 +15,7 @@ MIME_TYPE_MAPPINGS = {
 
 
 class CreateImagesRequest(BaseModel):
-    file_types: list[
-        Literal["jpg", "jpeg", "png", "bmp"]
-    ]  # List of accepted image file types
+    file_types: list[ACCEPTED_IMAGE_TYPES]  # List of accepted image file types
 
 
 class PresignedPostFields(BaseModel):
@@ -94,21 +93,33 @@ class PediatricAppendicitisPatientFeatures(BaseModel):
 FEATURE_NAMES = list(PediatricAppendicitisPatientFeatures.model_fields.keys())
 
 
-class PediatricAppendicitisPatient(PediatricAppendicitisPatientFeatures):
-    id: int
-    user_id: int
+class PediatricAppendicitisPredictions(BaseModel):
     diagnosis: Literal["appendicitis", "no appendicitis"]
     management: Literal["conservative", "surgical"]
     severity: Literal["complicated", "uncomplicated"]
     length_of_stay_pred: float
     length_of_stay_pi_lower: float
     length_of_stay_pi_upper: float
+
+
+class PediatricAppendicitisPatient(
+    PediatricAppendicitisPatientFeatures, PediatricAppendicitisPredictions
+):
+    id: int
+    user_id: int
     created_at: datetime
     updated_at: datetime
 
 
+class ImageResponse(BaseModel):
+    upload_id: str = Field(example="f47ac10b-58cc-4372-a567-0e02b2c3d479")
+    url: str = Field(
+        example="https://pediatric-appendicitis-images.s3.us-east-1.amazonaws.com/key?..."
+    )
+
+
 class PediatricAppendicitisPatientWithImages(PediatricAppendicitisPatient):
-    image_urls: list[str] = []
+    images: list[ImageResponse]
 
 
 class AddPediatricAppendicitisPatientRequest(BaseModel):

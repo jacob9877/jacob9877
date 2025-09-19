@@ -1,4 +1,4 @@
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -7,8 +7,8 @@ T = TypeVar("T")  # Generic type for data models
 
 class ResponseModel(BaseModel, Generic[T]):
     detail: str = ""
-    data: Optional[T] = None
+    data: T | None = None
 
 
 class PaginatedResults(BaseModel):
-    next_cursor: Optional[str] = Field(default=None, description="...")
+    next_cursor: str | None = Field(default=None, description="...")
