@@ -418,7 +418,6 @@ def get_pediatric_appendicitis_patients_paginated(
     description="Delete the patient with the provided patient ID",
     status_code=status.HTTP_204_NO_CONTENT,
     response_description="Nothing important. A status code of 204 on the response indicates success.",
-    response_model=ResponseModel[None],
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
@@ -462,7 +461,7 @@ def delete_patient(
 
         conn.commit()
 
-        return ResponseModel[None](detail="Patient deleted successfully")
+        return
 
     except Exception as e:
         conn.rollback()
