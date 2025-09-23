@@ -389,7 +389,9 @@ def _update_and_repredict(
     instance = [
         getattr(combined_features, feature_name) for feature_name in FEATURE_NAMES
     ]
-    new_diagnosis = get_predictions([instance], SAGEMAKER_ENDPOINT_NAME)[0]
+    new_diagnosis = get_predictions({"instances": [instance]}, SAGEMAKER_ENDPOINT_NAME)[
+        0
+    ]
 
     # Figure out which columns truly changed
     changed_features = [
