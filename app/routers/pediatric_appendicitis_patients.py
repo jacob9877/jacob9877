@@ -410,3 +410,61 @@ def get_pediatric_appendicitis_patients_paginated(
     except Exception as e:
         traceback.print_exc()
         raise e
+
+
+@router.delete(
+    "/{patient_id}",
+    summary="Delete a patient by ID",
+    description="Delete the patient with the provided patient ID",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_description="Nothing important. A status code of 204 on the response indicates success.",
+    response_model=ResponseModel[None],
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to perform the requested action",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient with provided ID not found",
+        },
+    },
+)
+def delete_patient(
+    patient_id: int,
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+
+            patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
+
+            if patient is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Patient with ID {patient_id} not found",
+                )
+
+            if patient.user_id != current_user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to delete this patient",
+                )
+
+            operation = """
+                DELETE FROM pediatric_appendicitis_patients
+                WHERE id=%s
+            """
+
+            params = (patient_id,)
+            cursor.execute(operation, params)
+
+        conn.commit()
+
+        return ResponseModel[None](detail="Patient deleted successfully")
+
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise e
