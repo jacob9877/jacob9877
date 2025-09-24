@@ -31,61 +31,11 @@ jobs:
           docker build -t $IMAGE_URI .
           docker push $IMAGE_URI
 
-      - name: Deploy to Lambda (publish version, move alias, set provisioned concurrency=1)
+      - name: Deploy to Lambda
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          FN_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
-          ALIAS_NAME: ${{ secrets.LAMBDA_ALIAS_NAME }}
         run: |
-          set -euo pipefail
-
           IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_NAME }}:latest
-
-          # 1) Update function code and PUBLISH a new version
-          VERSION=$(aws lambda update-function-code \
-            --function-name "$FN_NAME" \
-            --image-uri "$IMAGE_URI" \
-            --publish \
-            --query 'Version' --output text)
-
-          echo "Published version: $VERSION"
-
-          # 2) Create or update the alias to point to the new version
-          if aws lambda get-alias --function-name "$FN_NAME" --name "$ALIAS_NAME" >/dev/null 2>&1; then
-            aws lambda update-alias \
-              --function-name "$FN_NAME" \
-              --name "$ALIAS_NAME" \
-              --function-version "$VERSION"
-          else
-            aws lambda create-alias \
-              --function-name "$FN_NAME" \
-              --name "$ALIAS_NAME" \
-              --function-version "$VERSION"
-          fi
-
-          echo "Alias $ALIAS_NAME now points to version $VERSION"
-
-          # 3) Set Provisioned Concurrency = 1 on the alias
-          aws lambda put-provisioned-concurrency-config \
-            --function-name "$FN_NAME" \
-            --qualifier "$ALIAS_NAME" \
-            --provisioned-concurrent-executions ${{ secrets.PROVISIONED_CONCURRENCY }}
-
-          # 4) (Optional) Wait until PC is READY before exiting
-          echo "Waiting for provisioned concurrency to become READY..."
-          for i in {1..30}; do
-            STATUS=$(aws lambda get-provisioned-concurrency-config \
-              --function-name "$FN_NAME" \
-              --qualifier "$ALIAS_NAME" \
-              --query 'Status' --output text || true)
-            echo "Status: $STATUS"
-            if [ "$STATUS" = "READY" ]; then
-              echo "Provisioned concurrency is READY."
-              break
-            fi
-            if [ "$STATUS" = "FAILED" ]; then
-              echo "Provisioned concurrency FAILED to initialize." >&2
-              exit 1
-            fi
-            sleep 10
-          done
+          aws lambda update-function-code \
+            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --image-uri $IMAGE_URI
