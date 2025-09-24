@@ -1,0 +1,24 @@
+{
+  "project_name": "pediatric_appendicitis_chatbot",
+  "agents": [
+    {
+      "name": "pediatric_appendicitis_agent",
+      "entry_point": "app.utils.llm_appendicitis:agent",
+      "model": "google_genai:gemini-2.0-flash-lite",
+      "tools": [
+        "get_patient_info",
+        "explain_diagnosis"
+      ]
+    }
+  ],
+  "graphs": {
+    "harry": "app.utils.llm_appendicitis:graph"
+  },
+  "checkpointing": {
+    "type": "memory",
+    "namespace": "harry"
+  },
+  "dependencies": [
+    "app.utils.llm_appendicitis"
+  ]
+}

@@ -10,9 +10,9 @@ from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.models.mortality_patient_models import FEATURE_NAMES
+from app.models.pediatric_appendicitis_models import FEATURE_NAMES
 from app.models.conversation_models import Conversation
-from app.utils.db import get_mortality_patient_by_id
+from app.utils.db import get_pediatric_appendicitis_patient_by_id
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -22,10 +22,15 @@ DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_PORT = int(os.environ["DB_PORT"])
 DB_NAME = os.environ["DB_NAME"]
 
-CHECKPOINT_NAMESPACE = "barry"
+CHECKPOINT_NAMESPACE = "harry"
 
 SYSTEM_PROMPT = """
 You are a specialized medical AI agent for doctors focused on Pediatric Appendicitis named Harry. You have access to comprehensive information about Pediatric Appendicitis and tools to gain information about patients to provide to doctor users.
+- If the user refers to "patient X" or gives just a number (e.g. "3"), interpret this as patient_id=X and call the get_patient_info tool.
+- If a patient_id is provided in the conversation context, assume it applies. 
+- If no patient_id is set in the conversation context, infer the patient_id from the user’s message.
+- Always use the tools when retrieving patient details.
+- If no patient is found, respond empathetically.
 
 IMPORTANT INSTRUCTIONS:
 1. Always prioritize information from the provided knowledge base and that can be obtained from the tools provided to you.
@@ -37,16 +42,15 @@ IMPORTANT INSTRUCTIONS:
 7. Focus specifically on pediatric appendicitis topics
 8. Keep responses brief. For example, one paragraph or up to 5 bullet points.
 
-The system you are part of stores the following features about doctor's breast cancer patients' tumors:
-- mean_radius: The mean radius of the tumor in millimeters
-- mean_texture: The mean texture of the tumor in millimeters
-- mean_perimeter: The mean perimeter of the tumor in millimeters
-- mean_area: The mean area of the tumor in square millimeters
-- mean_smoothness: The mean smoothness of the tumor, a dimensionless value
-- Diagnosis (0 for benign, 1 for malignant): The predicted diagnosis of the tumor based on the features above
+The system you are part of stores the following features about doctor's pediatric appendicitis patients' tumors:
+- Age: float | None = Field(default=None, gt=0, example=12.68)
+- BMI: float | None = Field(default=None, gt=0, example=16.90)
+- Sex: Literal["male", "female"] | None = Field(example="female")
+- Height: float | None = Field(default=None, gt=0, example=148.0)
+- Weight: float | None = Field(default=None, gt=0, example=37.0)
 When requesting an explanation for a diagnosis, you will receive SHAP analysis that provides the contribution of each feature to the predicted diagnosis.
 
-Please provide helpful, accurate information about breast cancer while emphasizing the importance of professional medical consultation.
+Please provide helpful, accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
 """
 
 
@@ -54,22 +58,23 @@ class GetPatientInfoInput(BaseModel):
 
     patient_id: int = Field(
         ...,
-        description="The integer ID (MySQL PK) of the breast cancer patient to retrieve information for",
+        description="The integer ID (MySQL PK) of the pediatric appendicitis patient to retrieve information for",
         example=123,
     )
 
 
 @tool(
-    description="Retrieve detailed information about a breast cancer patient given their patient ID. Call this tool when asked about any patient info not having to do with reasoning for the diagnosis.",
+    description="Retrieve detailed information about a pediatric appendicitis patient given their patient ID. Call this tool when asked about any patient info not having to do with reasoning for the diagnosis.",
     args_schema=GetPatientInfoInput,
 )
 def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
 
-    if patient_id != config["configurable"].get("patient_id"):
+    if config["configurable"].get("patient_id") and patient_id != config["configurable"]["patient_id"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
-        )
+    )
+
 
     with mysql.connector.connect(
         host=os.environ["DB_HOST"],
@@ -80,7 +85,7 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
     ) as conn:
         with conn.cursor(dictionary=True) as cursor:
 
-            patient = get_mortality_patient_by_id(cursor, patient_id)
+            patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
     if patient is None:
         raise HTTPException(
@@ -107,16 +112,13 @@ class GetPatientExplanationInput(BaseModel):
 
 
 @tool(
-    description="Explain a breast cancer patient's diagnosis using SHAP analysis based on their patient ID. Call this tool when asked for any reasoning behind the diagnosis.",
+    description="Explain a pediatric appendicitis patient's diagnosis using SHAP analysis based on their patient ID. Call this tool when asked for any reasoning behind the diagnosis.",
     args_schema=GetPatientExplanationInput,
 )
 def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
 
     # If the conversation is about a patient, make ture this tool call is about the same patient
-    if config["configurable"].get("patient_id") and patient_id != config[
-        "configurable"
-    ].get("patient_id"):
-
+    if config["configurable"].get("patient_id") and patient_id != config["configurable"].get("patient_id"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
@@ -131,25 +133,28 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     ) as conn:
         with conn.cursor(dictionary=True) as cursor:
             columns = (
-                ["diagnosis", "user_id"]  # Columns from breast_cancer_patients table
-                + FEATURE_NAMES  # Feature values from breast_cancer_patients table
+                [
+                    "diagnosis",
+                    "user_id",
+                ]  # Columns from pediatric_appendicitis_patients table
+                + FEATURE_NAMES  # Feature values from pediatric_appendicitis_patients table
                 + [
                     f"contribution_{feature_name}" for feature_name in FEATURE_NAMES
-                ]  # Contribution values from breast_cancer_explanations table
+                ]  # Contribution values from pediatric_appendicitis_explanations table
                 + [
                     "patient_id",
                     "raw_probability",
                     "threshold",
                     "expected_value",
-                ]  # Columns from breast_cancer_explanations table
+                ]  # Columns from pediatric_appendicitis_explanations table
             )
 
             operation = f"""
-                SELECT {", ".join(columns)} 
-                FROM breast_cancer_patients
-                INNER JOIN breast_cancer_explanations
-                    ON breast_cancer_patients.id = breast_cancer_explanations.patient_id
-                WHERE breast_cancer_explanations.patient_id = %s
+                SELECT {", ".join(columns)}
+                FROM pediatric_appendicitis_patients
+                INNER JOIN pediatric_appendicitis_explanations
+                    ON pediatric_appendicitis_patients.id = pediatric_appendicitis_explanations.patient_id
+                WHERE pediatric_appendicitis_explanations.patient_id = %s
             """
             params = (patient_id,)
             cursor.execute(operation, params)
@@ -196,9 +201,11 @@ model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
 
 def build_config(conversation: Conversation) -> dict:
+    thread_id = f"pediatric_appendicitis_patients-{conversation.id}"
+
     config = {
         "configurable": {
-            "thread_id": str(conversation.id),  # LangGraph likes string thread_id
+            "thread_id": f"pediatric_appendicitis_patients-{conversation.id}",
             "user_id": conversation.user_id,
             "patient_id": conversation.patient_id,
         },
@@ -207,37 +214,52 @@ def build_config(conversation: Conversation) -> dict:
     return config
 
 
-def get_chat_response(conversation: Conversation, user_message: str) -> str:
-    config = build_config(conversation)
+# def get_chat_response(conversation: Conversation, user_message: str) -> str:
+#     config = build_config(conversation)
 
+#     with PyMySQLSaver.from_conn_string(
+#         f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+#     ) as saver:
+
+#         prompt = SYSTEM_PROMPT
+#         if conversation.patient_id:
+#             prompt += f"You are chatting with a doctor about pediatric appendicitis patients with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
+
+#         agent = create_react_agent(
+#             model=model,
+#             tools=[explain_diagnosis, get_patient_info],
+#             prompt=prompt,
+#             checkpointer=saver,
+#         )
+
+
+#         response = agent.invoke(
+#             {
+#                 "messages": [
+#                     {
+#                         "role": "user",
+#                         "content": user_message,
+#                     }
+#                 ]
+#             },
+#             config,
+#         )
+#         ai_message = response["messages"][-1].content
+#         return ai_message
+def get_chat_response(conversation: Conversation, user_message: str) -> str:
     with PyMySQLSaver.from_conn_string(
         f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     ) as saver:
-
-        prompt = SYSTEM_PROMPT
-        if conversation.patient_id:
-            prompt += f"You are chatting with a doctor about mortality patients with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
-
-        agent = create_react_agent(
-            model=model,
-            tools=[explain_diagnosis, get_patient_info],
-            prompt=prompt,
-            checkpointer=saver,
-        )
-
-        response = agent.invoke(
+        response = graph.invoke(
+            {"messages": [{"role": "user", "content": user_message}]},
             {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": user_message,
-                    }
-                ]
+                **build_config(conversation),
+                "checkpointer": saver,
+                "if_not_exists": "create",  # 👈 only here
             },
-            config,
         )
-        ai_message = response["messages"][-1].content
-        return ai_message
+
+    return response["messages"][-1].content
 
 
 TITLE_SYSTEM_PROMPT = """
@@ -254,3 +276,10 @@ def get_gemini_title(message: str) -> str:
     messages = [("system", TITLE_SYSTEM_PROMPT), ("human", message)]
     response = model.invoke(messages)
     return response.content
+
+
+graph = create_react_agent(
+    model=model,
+    tools=[explain_diagnosis, get_patient_info],
+    prompt=SYSTEM_PROMPT 
+)
