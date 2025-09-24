@@ -451,11 +451,19 @@ def delete_patient(
                     detail="Not authorized to delete this patient",
                 )
 
+            # Delete the patient record
             operation = """
                 DELETE FROM pediatric_appendicitis_patients
                 WHERE id=%s
             """
+            params = (patient_id,)
+            cursor.execute(operation, params)
 
+            # Delete any associated images
+            operation = """
+                DELETE FROM pediatric_appendicitis_images
+                WHERE patient_id=%s
+            """
             params = (patient_id,)
             cursor.execute(operation, params)
 
