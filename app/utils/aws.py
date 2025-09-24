@@ -1,14 +1,16 @@
 import json
-import time
 import uuid
-from typing import Literal
 
+import backoff
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 
-from app.models.pediatric_appendicitis_models import MIME_TYPE_MAPPINGS
+from app.models.pediatric_appendicitis_models import (
+    ACCEPTED_IMAGE_TYPES,
+    MIME_TYPE_MAPPINGS,
+)
 
 ATTEMPTS = 4
 
@@ -19,28 +21,30 @@ def get_predictions(body: dict, sagemaker_endpoint_name) -> dict:
         config=Config(retries={"max_attempts": ATTEMPTS, "mode": "standard"}),
     )
 
-    delay_sec = 1
-    for attempt in range(ATTEMPTS):
-        try:
-            response = sagemaker_client.invoke_endpoint(
-                EndpointName=sagemaker_endpoint_name,
-                ContentType="application/json",
-                Body=json.dumps(body),
-            )
-            result_raw = response["Body"].read().decode("utf-8")
-        except sagemaker_client.exceptions.ModelNotReadyException:
-            # If reached max retry attempts
-            if attempt == ATTEMPTS - 1:
-                # Give up
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Model is unavailable even after retries",
-                )
-            time.sleep(delay_sec)
-            delay = min(
-                delay * 2, 16
-            )  # Exponential backoff with max of 16 seconds delay
+    # Apply exponential backoff to endpoint invocation with max wait time of 16s
+    @backoff.on_exception(
+        backoff.expo,
+        sagemaker_client.exceptions.ModelNotReadyException,
+        max_tries=ATTEMPTS,
+        max_value=16,
+        jitter=backoff.full_jitter,
+    )
+    def _invoke_endpoint():
+        return sagemaker_client.invoke_endpoint(
+            EndpointName=sagemaker_endpoint_name,
+            ContentType="application/json",
+            Body=json.dumps(body),
+        )
 
+    try:
+        response = _invoke_endpoint()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Model is unavailable {str(e)}",
+        ) from e
+
+    result_raw = response["Body"].read().decode("utf-8")
     result = json.loads(result_raw)
     return result
 
@@ -75,10 +79,10 @@ def create_presigned_url(
     return response
 
 
-def create_presigned_post(
+def create_presigned_post_for_image(
     bucket: str,
     key: str,
-    file_type: str,
+    file_type: ACCEPTED_IMAGE_TYPES,
     max_size_in_bytes: int,
     expires_in_sec: int = 60,
 ):
@@ -121,5 +125,6 @@ def s3_file_exists(bucket: str, key: str):
         else:
             # Handle other potential errors (e.g., permissions)
             print(f"An error occurred: {e}")
+            raise
             raise
             raise

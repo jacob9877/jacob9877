@@ -1,6 +1,6 @@
 import traceback
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import (
     APIRouter,
@@ -157,7 +157,7 @@ def add_patients_json(
     },
 )
 def add_patients_csv(
-    file: Optional[UploadFile] = File(None),
+    file: UploadFile | None = File(None),
     conn: MySQLConnection = Depends(get_db_connection),
     current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
@@ -268,7 +268,7 @@ def get_patient(
 )
 def get_user_mortality_patients_paginated(
     # Optional cursor from previous response
-    cursor_token: Optional[str] = Query(
+    cursor_token: str | None = Query(
         default=None,
         alias="cursor",
         description="Opaque cursor returned from the previous page (base64url)",
@@ -325,7 +325,7 @@ def get_user_mortality_patients_paginated(
 
         patients = [MortalityPatient(**row) for row in rows]
 
-        next_cursor: Optional[str] = None
+        next_cursor: str | None = None
         if has_more and rows:
             last_row = rows[-1]
             last_updated_at: datetime = last_row["updated_at"]
@@ -350,9 +350,9 @@ def _update_and_repredict(
     *,
     cursor: MySQLCursorDict,
     patient_id: int,
-    partial_update: Optional[
-        UpdateMortalityPatientRequest
-    ] = UpdateMortalityPatientRequest(),  # None -> repredict-only
+    partial_update: (
+        UpdateMortalityPatientRequest | None
+    ) = UpdateMortalityPatientRequest(),  # None -> repredict-only
 ) -> MortalityPatient:
 
     # Fetch current features

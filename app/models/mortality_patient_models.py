@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -167,19 +167,19 @@ class Explanation(BaseModel):
 
 class UpdateMortalityPatientRequest(BaseModel):
     # Demographic features
-    age: Optional[float] = Field(
+    age: float | None = Field(
         None,
         gt=0,
         le=120,
         example=53,
     )
-    height: Optional[float] = Field(
+    height: float | None = Field(
         None,
         gt=30,
         le=250,
         example=177.6,
     )
-    weight: Optional[float] = Field(
+    weight: float | None = Field(
         None,
         gt=1,
         le=400,
@@ -187,36 +187,36 @@ class UpdateMortalityPatientRequest(BaseModel):
     )
 
     # Apache scores
-    ventilated_apache: Optional[Literal[0, 1]] = Field(
+    ventilated_apache: Literal[0, 1] | None = Field(
         None,
         example=1,
     )
-    apache_4a_icu_death_prob: Optional[float] = Field(
+    apache_4a_icu_death_prob: float | None = Field(
         None,
         ge=0,
         le=1,
         example=0.03,
     )
-    apache_3j_diagnosis: Optional[float] = Field(
+    apache_3j_diagnosis: float | None = Field(
         None,
         gt=0,
         example=501.05,
     )
 
     # Vital signs
-    d1_heartrate_min: Optional[float] = Field(
+    d1_heartrate_min: float | None = Field(
         None,
         gt=0,
         le=300,
         example=72,
     )
-    d1_resprate_min: Optional[float] = Field(
+    d1_resprate_min: float | None = Field(
         None,
         ge=0,
         le=80,
         example=12,
     )
-    d1_resprate_max: Optional[float] = Field(
+    d1_resprate_max: float | None = Field(
         None,
         ge=0,
         le=120,
@@ -224,19 +224,19 @@ class UpdateMortalityPatientRequest(BaseModel):
     )
 
     # Lab results
-    d1_bun_min: Optional[float] = Field(
+    d1_bun_min: float | None = Field(
         None,
         ge=0,
         le=200,
         example=18.0,
     )
-    d1_hemaglobin_min: Optional[float] = Field(
+    d1_hemaglobin_min: float | None = Field(
         None,
         ge=0,
         le=25,
         example=10.4,
     )
-    d1_sodium_max: Optional[float] = Field(
+    d1_sodium_max: float | None = Field(
         None,
         ge=100,
         le=200,
