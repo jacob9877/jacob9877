@@ -147,7 +147,7 @@ class PediatricAppendicitisPatientWithImages(PediatricAppendicitisPatient):
     images: list[ImageResponse]
 
 
-class AddPediatricAppendicitisPatientRequest(BaseModel):
+class UpsertPediatricAppendicitisPatientRequest(BaseModel):
     features: PediatricAppendicitisPatientFeatures
     image_upload_ids: list[str] | None = []
 

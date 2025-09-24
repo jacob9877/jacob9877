@@ -9,7 +9,6 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.common_models import ResponseModel
 from app.models.pediatric_appendicitis_models import (
     FEATURE_NAMES,
-    AddPediatricAppendicitisPatientRequest,
     CreateImagesRequest,
     ImageResponse,
     PaginatedPediatricAppendicitisPatients,
@@ -19,6 +18,7 @@ from app.models.pediatric_appendicitis_models import (
     PediatricAppendicitisPredictions,
     PresignedUpload,
     S3Uri,
+    UpsertPediatricAppendicitisPatientRequest,
 )
 from app.utils.aws import (
     create_presigned_post_for_image,
@@ -176,7 +176,7 @@ def _insert_patient(
     status_code=status.HTTP_201_CREATED,
 )
 def add_patient(
-    add_patient_request: AddPediatricAppendicitisPatientRequest,
+    add_patient_request: UpsertPediatricAppendicitisPatientRequest,
     conn: MySQLConnection = Depends(get_db_connection),
     current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
@@ -470,6 +470,158 @@ def delete_patient(
         conn.commit()
 
         return
+
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise e
+
+
+def _update_patient(
+    cursor: MySQLCursorDict,
+    patient_id: int,
+    features: PediatricAppendicitisPatientFeatures,
+    predictions: PediatricAppendicitisPredictions,
+) -> PediatricAppendicitisPatient:
+    column_names = [
+        *FEATURE_NAMES,
+        *list(PediatricAppendicitisPredictions.model_fields.keys()),
+    ]
+    set_clause = ", ".join(f"{column_name}=%s" for column_name in column_names)
+    operation = f"""
+        UPDATE pediatric_appendicitis_patients
+        SET {set_clause}
+        WHERE id=%s
+    """
+    params = (
+        tuple(getattr(features, name) for name in FEATURE_NAMES)
+        + tuple(predictions.model_dump().values())
+        + (patient_id,)
+    )
+    cursor.execute(operation, params)
+
+    operation = """
+        SELECT *
+        FROM pediatric_appendicitis_patients
+        WHERE id = %s
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+
+    return PediatricAppendicitisPatient(**row)
+
+
+@router.put(
+    "/{patient_id}",
+    summary="Update a patient (and re-predict)",
+    description="Provide the new patient info; the predictions are always re-predicted and saved.",
+    response_model=ResponseModel[PediatricAppendicitisPatientWithImages],
+    response_description="Returns the updated patient with pre-signed URLs for any images",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to perform the requested action",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+    },
+)
+def update_patient(
+    patient_id: int,
+    update_patient_request: UpsertPediatricAppendicitisPatientRequest,
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+            patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
+
+            if patient is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Patient with ID {patient_id} not found",
+                )
+
+            if patient.user_id != current_user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Not authorized to access this patient",
+                )
+
+            image_upload_ids = update_patient_request.image_upload_ids or []
+
+            # If the user provided images
+            if image_upload_ids:
+                # Delete all images except those images
+                placeholders = ",".join(["%s"] * len(image_upload_ids))
+                operation = f"""
+                    DELETE FROM pediatric_appendicitis_images
+                    WHERE patient_id=%s AND user_id=%s AND upload_id NOT IN ({placeholders})
+                """
+                params = (patient_id, current_user_id, *image_upload_ids)
+                cursor.execute(operation, params)
+            # If the user provided no images
+            else:
+                # This means the patient should have no images associated with it. This else block is necessary to prevent SQL syntax error
+                operation = """
+                    DELETE FROM pediatric_appendicitis_images
+                    WHERE patient_id=%s AND user_id=%s
+                """
+                params = (patient_id, current_user_id)
+                cursor.execute(operation, params)
+
+            image_s3_uris = [
+                _get_s3_uri_for_upload_id(cursor, upload_id, current_user_id)
+                for upload_id in image_upload_ids
+            ]
+
+            body = {
+                "features": update_patient_request.features.model_dump(),
+                "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
+            }
+            predictions = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
+            predictions_validated = PediatricAppendicitisPredictions(**predictions)
+            new_patient = _update_patient(
+                cursor,
+                patient_id,
+                update_patient_request.features,
+                predictions_validated,
+            )
+
+            if image_upload_ids:
+                # Update the images to link them to the new patient
+                placeholders = ", ".join(["%s"] * len(image_upload_ids))
+                operation = f"""
+                    UPDATE pediatric_appendicitis_images
+                    SET patient_id = %s
+                    WHERE upload_id IN ({placeholders}) AND user_id = %s
+                """
+                params = (
+                    new_patient.id,
+                    *image_upload_ids,
+                    current_user_id,
+                )
+                cursor.execute(operation, params)
+
+        images: list[ImageResponse] = []
+        for upload_id, image_s3_uri in zip(image_upload_ids, image_s3_uris):
+            presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
+            images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
+
+        patient_with_images = PediatricAppendicitisPatientWithImages(
+            **new_patient.model_dump(), images=images
+        )
+
+        conn.commit()
+
+        return ResponseModel[PediatricAppendicitisPatientWithImages](
+            data=patient_with_images,
+            detail="Patient updated, predictions obtained, and URLs created successfully",
+        )
 
     except Exception as e:
         conn.rollback()
