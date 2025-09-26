@@ -627,3 +627,92 @@ def update_patient(
         conn.rollback()
         traceback.print_exc()
         raise e
+
+
+@router.delete(
+    "",
+    summary="Delete multiple patients by IDs",
+    description="Deletes the patients whose IDs are provided",
+    response_model=ResponseModel[list[int]],
+    response_description="Returns the list of IDs that were deleted",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to perform the requested action",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "One or more patient IDs not found",
+        },
+    },
+)
+def delete_patients(
+    patient_ids: list[int] = Query(
+        ...,
+        min_items=1,
+        description="List of patient IDs to delete",
+        example="ids=1&ids=2&ids=3",
+    ),
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+
+            # Verify all IDs exist
+            placeholders = ",".join(["%s"] * len(patient_ids))
+            operation = f"""
+                SELECT id, user_id
+                FROM pediatric_appendicitis_patients
+                WHERE id IN ({placeholders})
+            """
+            params = tuple(patient_ids)
+            cursor.execute(operation, params)
+
+            rows = cursor.fetchall()
+
+            found_ids = [row["id"] for row in rows]
+            missing_ids = [pid for pid in patient_ids if pid not in found_ids]
+            if missing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Patient IDs not found: {missing_ids}",
+                )
+
+            forbidden_ids = [
+                row["id"] for row in rows if row["user_id"] != current_user_id
+            ]
+            if forbidden_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Not authorized to delete these patients {forbidden_ids}",
+                )
+
+            # Perform delete
+            operation = f"""
+                DELETE FROM pediatric_appendicitis_patients
+                WHERE id IN ({placeholders})
+            """
+            params = tuple(patient_ids)
+            cursor.execute(operation, params)
+
+            # Delete any images associated with the patients
+            operation = f"""
+                DELETE FROM pediatric_appendicitis_images
+                WHERE patient_id IN ({placeholders})
+            """
+            params = tuple(patient_ids)
+            cursor.execute(operation, params)
+
+        conn.commit()
+
+        return ResponseModel[list[int]](
+            data=patient_ids,
+            detail=f"Deleted {len(patient_ids)} patients successfully",
+        )
+
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise e
