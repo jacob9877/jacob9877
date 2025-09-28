@@ -1,3 +1,4 @@
+import os
 import traceback
 import uuid
 from datetime import datetime
@@ -21,6 +22,7 @@ from app.models.pediatric_appendicitis_models import (
     UpsertPediatricAppendicitisPatientRequest,
 )
 from app.utils.aws import (
+    bulk_send_message_to_sqs,
     create_presigned_post_for_image,
     create_presigned_url,
     get_predictions,
@@ -43,6 +45,7 @@ router = APIRouter(
 
 IMAGES_BUCKET = "pediatric-appendicitis-images"
 SAGEMAKER_ENDPOINT_NAME = "pediatric-appendicitis"
+EXPLANATION_QUEUE_URL = os.environ["PEDIATRIC_APPENDICITIS_EXPLANATION_QUEUE_URL"]
 
 
 def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
@@ -231,6 +234,21 @@ def add_patient(
         )
 
         conn.commit()
+
+        # Send the new patient info to SQS for explanation processing
+        features = {
+            "Diagnosis": predictions_validated.diagnosis,
+            "Management": predictions_validated.management,
+            "Severity": predictions_validated.severity,
+        } | patient_with_images.model_dump(include=set(FEATURE_NAMES))
+        messages = [
+            {
+                "patient_id": new_patient.id,
+                "features": features,
+                "image_uris": [image_uri.model_dump() for image_uri in image_s3_uris],
+            }
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
         return ResponseModel[PediatricAppendicitisPatientWithImages](
             data=patient_with_images,
