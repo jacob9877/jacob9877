@@ -58,6 +58,7 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
     description="Given a list of file extensions of images to be uploaded, returns a pre-signed URL with additional data for each of them",
     status_code=status.HTTP_201_CREATED,
     response_model=list[PresignedUpload],
+    response_model_by_alias=True,
     response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request)",
 )
 def create_presigned_uploads(
