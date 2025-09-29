@@ -21,9 +21,11 @@ class CreateImagesRequest(BaseModel):
 class PresignedPostFields(BaseModel):
     key: str
     content_type: str = Field(example="image/bmp", alias="Content-Type")
-    AWSAccessKeyId: str
+    algorithm: str = Field(example="AWS4-HMAC-SHA256", alias="x-amz-algorithm")
+    credential: str = Field(alias="x-amz-credential")
+    date: str = Field(alias="x-amz-date")
     policy: str
-    signature: str
+    signature: str = Field(alias="x-amz-signature")
 
     class Config:
         extra = "ignore"
