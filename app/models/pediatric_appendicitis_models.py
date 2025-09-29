@@ -26,7 +26,7 @@ class PresignedPostFields(BaseModel):
     date: str = Field(alias="x-amz-date")
     policy: str
     signature: str = Field(alias="x-amz-signature")
-    security_token: str = Field(alias="x-amz-security-token")
+    security_token: str | None = Field(alias="x-amz-security-token")
 
     class Config:
         extra = "ignore"
