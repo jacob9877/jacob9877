@@ -20,7 +20,7 @@ class CreateImagesRequest(BaseModel):
 
 class PresignedPostFields(BaseModel):
     key: str
-    Content_Type: str = Field(example="image/bmp")
+    Content-Type: str = Field(example="image/bmp")
     AWSAccessKeyId: str
     policy: str
     signature: str
