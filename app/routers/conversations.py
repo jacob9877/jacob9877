@@ -12,17 +12,24 @@ from app.models.conversation_models import (
     StartConversationRequest,
     StartConversationResponse,
 )
+from app.utils.assistants.base_assistant import Assistant
+from app.utils.assistants.clinician_breast_cancer_assistant import (
+    ClinicianBreastCancerAssistant,
+)
+from app.utils.assistants.clinician_pediatric_appendicitis_assistant import (
+    ClinicianPediatricAppendicitisAssistant,
+)
 from app.utils.db import (
-    get_breast_cancer_conversation_by_id,
     get_breast_cancer_patient_by_id,
+    get_conversation_by_id,
     get_db_connection,
+    get_pediatric_appendicitis_patient_by_id,
 )
 from app.utils.jwt import get_and_validate_current_user_id
-from app.utils.llm import get_gemini_title
 
 router = APIRouter(
-    prefix="/breast-cancer-conversations",
-    tags=["Breast Cancer Conversations"],
+    prefix="/conversations",
+    tags=["Conversations"],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],
@@ -31,10 +38,15 @@ router = APIRouter(
     },
 )
 
+assistant_mapping: dict[str, type[Assistant]] = {
+    "clinician-breast-cancer": ClinicianBreastCancerAssistant,
+    "clinician-pediatric-appendicitis": ClinicianPediatricAppendicitisAssistant,
+}
+
 
 @router.post(
     "",
-    summary="Create a conversation about breast cancer",
+    summary="Create a conversation",
     description="",
     response_model=ResponseModel[StartConversationResponse],
     response_description="ID of the newly created conversation and the title",
@@ -59,7 +71,15 @@ def start_conversation(
         with conn.cursor(dictionary=True) as cursor:
             # If patient_id is provided, ensure the user has access to this patient
             if request.patient_id is not None:
-                patient = get_breast_cancer_patient_by_id(cursor, request.patient_id)
+                if request.assistant == "clinician-breast-cancer":
+                    patient = get_breast_cancer_patient_by_id(
+                        cursor, request.patient_id
+                    )
+                else:
+                    patient = get_pediatric_appendicitis_patient_by_id(
+                        cursor, request.patient_id
+                    )
+
                 if patient is None:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
@@ -71,12 +91,20 @@ def start_conversation(
                         detail=f"Not authorized to chat about patient with ID {request.patient_id}",
                     )
 
-            conversation_title = get_gemini_title(request.user_message)
+            conversation_title = assistant_mapping[request.assistant].get_title(
+                request.user_message
+            )
+
             operation = """
-                INSERT INTO breast_cancer_conversations (user_id, patient_id, title)
-                VALUES (%s, %s, %s)
+                INSERT INTO conversations (user_id, patient_id, title, assistant)
+                VALUES (%s, %s, %s, %s)
             """
-            params = (current_user_id, request.patient_id, conversation_title)
+            params = (
+                current_user_id,
+                request.patient_id,
+                conversation_title,
+                request.assistant,
+            )
             cursor.execute(operation, params)
             conversation_id = cursor.lastrowid
         conn.commit()
@@ -99,7 +127,7 @@ def _get_conversation_history(
 ) -> list[Message]:
     operation = """
         SELECT role, content
-        FROM breast_cancer_messages
+        FROM messages
         WHERE conversation_id = %s
         ORDER BY message_order ASC, id ASC
     """
@@ -112,7 +140,7 @@ def _get_conversation_history(
 
 @router.get(
     "/{conversation_id}",
-    summary="Get all messages in a breast cancer conversation",
+    summary="Get all messages in a conversation",
     description="Get all messages for the conversation with the provided ID",
     response_model=ResponseModel[GetConversationResponse],
     response_description="Messages in the conversation sorted by timestamp",
@@ -138,7 +166,7 @@ def get_conversation(
     try:
         with conn.cursor(dictionary=True) as cursor:
 
-            conversation = get_breast_cancer_conversation_by_id(cursor, conversation_id)
+            conversation = get_conversation_by_id(cursor, conversation_id)
             if not conversation:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -184,7 +212,7 @@ def get_user_conversations(
 
             operation = f"""
                 SELECT id, title, patient_id
-                FROM breast_cancer_conversations
+                FROM conversations
                 WHERE user_id = %s {"AND patient_id = %s" if patient_id else ""}
                 ORDER BY updated_at DESC, id DESC
             """

@@ -44,12 +44,12 @@ def user_exists(cursor: MySQLCursorDict, user_id: int) -> bool:
     return get_user_by_id(cursor, user_id) is not None
 
 
-def get_breast_cancer_conversation_by_id(
+def get_conversation_by_id(
     cursor: MySQLCursorDict, conversation_id: int
 ) -> Conversation | None:
     operation = """
         SELECT *
-        FROM breast_cancer_conversations
+        FROM conversations
         WHERE id = %s
     """
     params = (conversation_id,)
@@ -60,10 +60,8 @@ def get_breast_cancer_conversation_by_id(
     return Conversation(**row)
 
 
-def breast_cancer_conversation_exists(
-    cursor: MySQLCursorDict, conversation_id: int
-) -> bool:
-    return get_breast_cancer_conversation_by_id(cursor, conversation_id) is not None
+def conversation_exists(cursor: MySQLCursorDict, conversation_id: int) -> bool:
+    return get_conversation_by_id(cursor, conversation_id) is not None
 
 
 def get_breast_cancer_patient_by_id(
