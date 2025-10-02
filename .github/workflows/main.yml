@@ -27,15 +27,58 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_NAME }}:latest
-          docker build -t $IMAGE_URI .
-          docker push $IMAGE_URI
+          set -euo pipefail
+          REPO="${{ secrets.ECR_REPOSITORY_NAME }}"
+          IMAGE_SHA_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
+          IMAGE_LATEST_URI="$ECR_REGISTRY/$REPO:latest"
 
-      - name: Deploy to Lambda
+          docker build -t "$IMAGE_SHA_URI" -t "$IMAGE_LATEST_URI" .
+          docker push "$IMAGE_SHA_URI"
+          docker push "$IMAGE_LATEST_URI"
+
+      - name: Deploy to Lambda, publish version, alias v2, and set provisioned concurrency
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ secrets.ECR_REPOSITORY_NAME }}:latest
-          aws lambda update-function-code \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-            --image-uri $IMAGE_URI
+          set -euo pipefail
+
+          FUNCTION_NAME="${{ secrets.LAMBDA_FUNCTION_NAME }}"
+          REPO="${{ secrets.ECR_REPOSITORY_NAME }}"
+          IMAGE_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
+          ALIAS_NAME="v2"
+          PC=1
+
+          echo "Updating function code for $FUNCTION_NAME to image $IMAGE_URI and publishing a version..."
+          VERSION=$(
+            aws lambda update-function-code \
+              --function-name "$FUNCTION_NAME" \
+              --image-uri "$IMAGE_URI" \
+              --publish \
+              --query 'Version' \
+              --output text
+          )
+          echo "Published Lambda version: $VERSION"
+
+          echo "Waiting for function update to complete..."
+          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+
+          echo "Creating or updating alias '$ALIAS_NAME' to point to version $VERSION..."
+          if aws lambda get-alias --function-name "$FUNCTION_NAME" --name "$ALIAS_NAME" >/dev/null 2>&1; then
+            aws lambda update-alias \
+              --function-name "$FUNCTION_NAME" \
+              --name "$ALIAS_NAME" \
+              --function-version "$VERSION"
+          else
+            aws lambda create-alias \
+              --function-name "$FUNCTION_NAME" \
+              --name "$ALIAS_NAME" \
+              --function-version "$VERSION"
+          fi
+
+          echo "Configuring provisioned concurrency ($PC) on alias '$ALIAS_NAME'..."
+          aws lambda put-provisioned-concurrency-config \
+            --function-name "$FUNCTION_NAME" \
+            --qualifier "$ALIAS_NAME" \
+            --provisioned-concurrent-executions "$PC"
+
+          echo "Deployment complete. Alias '$ALIAS_NAME' -> version $VERSION with provisioned concurrency = $PC."
