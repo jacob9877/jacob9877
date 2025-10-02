@@ -1,7 +1,3 @@
-import os
-
-import mysql.connector
-from dotenv import find_dotenv, load_dotenv
 from fastapi import HTTPException, status
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
@@ -10,18 +6,13 @@ from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.models.conversation_models import Conversation
-from app.models.pediatric_appendicitis_models import FEATURE_NAMES
+from app.models.conversation_models import AssistantSlug, Conversation
 from app.utils.assistants.base_assistant import Assistant
-from app.utils.db import get_pediatric_appendicitis_patient_by_id
-
-load_dotenv(find_dotenv(), override=True)
-
-DB_HOST = os.environ["DB_HOST"]
-DB_USER = os.environ["DB_USER"]
-DB_PASSWORD = os.environ["DB_PASSWORD"]
-DB_PORT = int(os.environ["DB_PORT"])
-DB_NAME = os.environ["DB_NAME"]
+from app.utils.db import (
+    db_connection_cm,
+    get_db_connection_string,
+    get_pediatric_appendicitis_patient_by_id,
+)
 
 
 class GetPatientInfoInput(BaseModel):
@@ -45,13 +36,7 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
         )
 
-    with mysql.connector.connect(
-        host=os.environ["DB_HOST"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        port=int(os.environ["DB_PORT"]),
-        database=os.environ["DB_NAME"],
-    ) as conn:
+    with db_connection_cm() as conn:
         with conn.cursor(dictionary=True) as cursor:
 
             patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
@@ -82,27 +67,30 @@ class GetPatientExplanationInput(BaseModel):
 
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
-ASSISTANT_NAME = "clinician-pediatric-appdicitis"
-
-
-def build_config(conversation: Conversation) -> dict:
-    config = {
-        "configurable": {
-            "thread_id": str(conversation.id),  # LangGraph likes string thread_id
-            "user_id": conversation.user_id,
-            "patient_id": conversation.patient_id,
-        },
-        "checkpoint_ns": ASSISTANT_NAME,
-    }
-    return config
-
 
 class ClinicianPediatricAppendicitisAssistant(Assistant):
 
-    def __init__(self):
-        return
+    def __init__(self, conversation: Conversation) -> None:
+        self.conversation = conversation
 
-    def _get_system_prompt(self, conversation: Conversation) -> str:
+    @property
+    def assistant_name(self) -> AssistantSlug:
+        return "clinician-pediatric-appendicitis"
+
+    def _build_config(self) -> dict:
+        config = {
+            "configurable": {
+                "thread_id": str(
+                    self.conversation.id
+                ),  # LangGraph likes string thread_id
+                "user_id": self.conversation.user_id,
+                "patient_id": self.conversation.patient_id,
+            },
+            "checkpoint_ns": self.assistant_name,
+        }
+        return config
+
+    def _get_system_prompt(self) -> str:
         prompt = """
             You are a specialized medical AI agent for doctors focused on pediatric appendicitis. You have access to comprehensive information about pediatric appendicitis and tools to gain information about patients to provide to doctor users.
 
@@ -118,21 +106,19 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
 
              Please provide helpful, accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
         """
-        if conversation.patient_id:
-            prompt += f"You are chatting with a doctor about pediatric appendicitis patient with ID {conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {conversation.patient_id}, and call the appropriate tools to gain relevant information."
+        if self.conversation.patient_id:
+            prompt += f"You are chatting with a doctor about breast cancer patient with ID {self.conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {self.conversation.patient_id}, and call the appropriate tools to gain relevant information."
         return prompt
 
-    def invoke(self, conversation: Conversation, user_message: str) -> str:
-        config = build_config(conversation)
+    def invoke(self, user_message: str) -> str:
+        config = self._build_config()
 
-        with PyMySQLSaver.from_conn_string(
-            f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-        ) as saver:
+        with PyMySQLSaver.from_conn_string(get_db_connection_string()) as saver:
 
             agent = create_react_agent(
                 model=model,
                 tools=[get_patient_info],
-                prompt=self._get_system_prompt(conversation),
+                prompt=self._get_system_prompt(),
                 checkpointer=saver,
             )
 

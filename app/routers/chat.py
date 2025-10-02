@@ -76,8 +76,8 @@ def chat_agent(
                     detail=f"Not authorized to access conversation {request.conversation_id}",
                 )
 
-            assistant = assistant_mapping[conversation.assistant]()
-            assistant_reply = assistant.invoke(conversation, request.user_message)
+            assistant = assistant_mapping[conversation.assistant](conversation)
+            assistant_reply = assistant.invoke(request.user_message)
 
             _insert_message(
                 cursor, request.conversation_id, "user", request.user_message

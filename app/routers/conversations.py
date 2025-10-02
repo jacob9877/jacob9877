@@ -7,6 +7,7 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import (
+    AssistantSlug,
     ConversationSummary,
     GetConversationResponse,
     StartConversationRequest,
@@ -194,18 +195,29 @@ def get_user_conversations(
     patient_id: int | None = Query(
         default=None, description="Patient ID to filter conversations by"
     ),
+    assistant: AssistantSlug | None = Query(
+        default=None, description="Type of assistant to filter conversations by"
+    ),
     current_user_id: int = Depends(get_and_validate_current_user_id),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
 
+            where_clause = "user_id=%s"
+            params = (current_user_id,)
+            if patient_id:
+                where_clause += "AND patient_id=%s"
+                params = params + (patient_id,)
+            if assistant:
+                where_clause += "AND assistant=%s"
+                params = params + (assistant,)
+
             operation = f"""
                 SELECT id, title, patient_id
                 FROM conversations
-                WHERE user_id = %s {"AND patient_id = %s" if patient_id else ""}
+                WHERE {where_clause}
                 ORDER BY updated_at DESC, id DESC
             """
-            params = (current_user_id, patient_id) if patient_id else (current_user_id,)
             cursor.execute(operation, params)
 
             rows = cursor.fetchall()
