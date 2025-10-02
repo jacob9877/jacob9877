@@ -6,13 +6,7 @@ from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
-from app.utils.assistants.base_assistant import Assistant
-from app.utils.assistants.clinician_breast_cancer_assistant import (
-    ClinicianBreastCancerAssistant,
-)
-from app.utils.assistants.clinician_pediatric_appendicitis_assistant import (
-    ClinicianPediatricAppendicitisAssistant,
-)
+from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import get_conversation_by_id, get_db_connection
 from app.utils.jwt import get_and_validate_current_user_id
 
@@ -26,11 +20,6 @@ router = APIRouter(
         },
     },
 )
-
-assistant_mapping: dict[str, type[Assistant]] = {
-    "clinician-breast-cancer": ClinicianBreastCancerAssistant,
-    "clinician-pediatric-appendicitis": ClinicianPediatricAppendicitisAssistant,
-}
 
 
 def _insert_message(

@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 from app.models.chat_models import Message
 
+AssistantSlug = Literal["clinician-breast-cancer", "clinician-pediatric-appendicitis"]
+
 
 class ConversationSummary(BaseModel):
     id: int
@@ -19,13 +21,13 @@ class Conversation(BaseModel):
     created_at: datetime
     updated_at: datetime
     patient_id: int | None = None  # If the conversation is patient-specific
-    assistant: Literal["clinician-breast-cancer", "clinician-pediatric-appendicitis"]
+    assistant: AssistantSlug
 
 
 class StartConversationRequest(BaseModel):
     user_message: str
     patient_id: int | None = None  # If the conversation is patient-specific
-    assistant: Literal["clinician-breast-cancer", "clinician-pediatric-appendicitis"]
+    assistant: AssistantSlug
 
 
 class StartConversationResponse(BaseModel):

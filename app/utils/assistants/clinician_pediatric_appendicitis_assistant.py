@@ -15,6 +15,8 @@ from app.models.pediatric_appendicitis_models import FEATURE_NAMES
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.db import get_pediatric_appendicitis_patient_by_id
 
+load_dotenv(find_dotenv(), override=True)
+
 DB_HOST = os.environ["DB_HOST"]
 DB_USER = os.environ["DB_USER"]
 DB_PASSWORD = os.environ["DB_PASSWORD"]

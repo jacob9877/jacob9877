@@ -12,13 +12,7 @@ from app.models.conversation_models import (
     StartConversationRequest,
     StartConversationResponse,
 )
-from app.utils.assistants.base_assistant import Assistant
-from app.utils.assistants.clinician_breast_cancer_assistant import (
-    ClinicianBreastCancerAssistant,
-)
-from app.utils.assistants.clinician_pediatric_appendicitis_assistant import (
-    ClinicianPediatricAppendicitisAssistant,
-)
+from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
     get_conversation_by_id,
@@ -37,11 +31,6 @@ router = APIRouter(
         },
     },
 )
-
-assistant_mapping: dict[str, type[Assistant]] = {
-    "clinician-breast-cancer": ClinicianBreastCancerAssistant,
-    "clinician-pediatric-appendicitis": ClinicianPediatricAppendicitisAssistant,
-}
 
 
 @router.post(
