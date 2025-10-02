@@ -192,9 +192,6 @@ def get_conversation(
 )
 def get_user_conversations(
     conn: MySQLConnection = Depends(get_db_connection),
-    patient_id: int | None = Query(
-        default=None, description="Patient ID to filter conversations by"
-    ),
     assistant: AssistantSlug | None = Query(
         default=None, description="Type of assistant to filter conversations by"
     ),
@@ -205,9 +202,6 @@ def get_user_conversations(
 
             where_clause = "user_id=%s"
             params = (current_user_id,)
-            if patient_id:
-                where_clause += "AND patient_id=%s"
-                params = params + (patient_id,)
             if assistant:
                 where_clause += "AND assistant=%s"
                 params = params + (assistant,)
