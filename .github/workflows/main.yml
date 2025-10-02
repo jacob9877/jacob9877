@@ -36,7 +36,7 @@ jobs:
           docker push "$IMAGE_SHA_URI"
           docker push "$IMAGE_LATEST_URI"
 
-      - name: Deploy, set PC on VERSION, repoint alias v2, and cleanup
+      - name: Deploy, set PC on VERSION, poll READY, repoint alias v2, and cleanup
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
@@ -58,18 +58,48 @@ jobs:
               --output text
           )
           echo "Published version: $VERSION"
-          aws lambda wait function-updated --function-name "$FUNCTION_NAME"
+
+          # Wait for the published version to be active
+          echo "Waiting for published version to become ACTIVE…"
+          aws lambda wait published-version-active \
+            --function-name "$FUNCTION_NAME" \
+            --qualifier "$VERSION"
 
           echo "Set provisioned concurrency ($PC) on VERSION $VERSION…"
           aws lambda put-provisioned-concurrency-config \
             --function-name "$FUNCTION_NAME" \
             --qualifier "$VERSION" \
             --provisioned-concurrent-executions "$PC"
-          aws lambda wait provisioned-concurrency-config-ready \
-            --function-name "$FUNCTION_NAME" \
-            --qualifier "$VERSION"
 
-          echo "Ensure alias exists and has NO weighted routing; point to $VERSION…"
+          # Poll until PC status is READY or FAILED (no official waiter exists)
+          echo "Polling provisioned concurrency status for VERSION $VERSION…"
+          ATTEMPTS=60   # ~10 minutes max
+          SLEEP_SECS=10
+          for i in $(seq 1 $ATTEMPTS); do
+            STATUS=$(aws lambda get-provisioned-concurrency-config \
+              --function-name "$FUNCTION_NAME" \
+              --qualifier "$VERSION" \
+              --query 'Status' \
+              --output text 2>/dev/null || echo "MISSING")
+            if [ "$STATUS" = "READY" ]; then
+              echo "Provisioned concurrency is READY."
+              break
+            elif [ "$STATUS" = "FAILED" ]; then
+              REASON=$(aws lambda get-provisioned-concurrency-config \
+                --function-name "$FUNCTION_NAME" \
+                --qualifier "$VERSION" \
+                --query 'StatusReason' \
+                --output text || true)
+              echo "ERROR: Provisioned concurrency FAILED: $REASON"
+              exit 1
+            else
+              echo "Status=$STATUS; retrying in ${SLEEP_SECS}s… ($i/$ATTEMPTS)"
+              sleep "$SLEEP_SECS"
+            fi
+          done
+
+          # Ensure alias exists, no weights, and points to new version
+          echo "Ensure alias '$ALIAS_NAME' points to version $VERSION with no weighted routing…"
           if aws lambda get-alias --function-name "$FUNCTION_NAME" --name "$ALIAS_NAME" >/dev/null 2>&1; then
             aws lambda update-alias \
               --function-name "$FUNCTION_NAME" \
@@ -83,14 +113,13 @@ jobs:
               --function-version "$VERSION"
           fi
 
-          echo "CLEANUP: remove PC from alias (if any) to avoid conflicts…"
+          echo "CLEANUP: remove PC from alias (if any) and from all other versions…"
           # Delete PC on alias if previously set (ignore if not found)
           aws lambda delete-provisioned-concurrency-config \
             --function-name "$FUNCTION_NAME" \
             --qualifier "$ALIAS_NAME" || true
 
-          echo "CLEANUP: remove PC from all other versions…"
-          # Get all qualifiers with PC and drop anything that's not the new VERSION
+          # Remove PC from any qualifier other than the new version
           OTHER_PCS=$(aws lambda list-provisioned-concurrency-configs \
             --function-name "$FUNCTION_NAME" \
             --query "ProvisionedConcurrencyConfigs[?Qualifier!='${VERSION}'].Qualifier" \
@@ -102,20 +131,4 @@ jobs:
               --qualifier "$q" || true
           done
 
-          echo "CLEANUP COMPLETE. Alias '$ALIAS_NAME' -> version $VERSION; PC=$PC on version only."
-
-          # OPTIONAL: prune old versions (keep the last 5 and any referenced by aliases)
-          # Uncomment if you want automated pruning.
-          #
-          # echo "Optional prune: delete old versions not referenced by any alias (keeping 5 most recent)…"
-          # CURRENT_ALIASED=$(aws lambda list-aliases --function-name "$FUNCTION_NAME" --query 'Aliases[].FunctionVersion' --output text | tr '\t' '\n' | sort -u)
-          # ALL_VERSIONS=$(aws lambda list-versions-by-function --function-name "$FUNCTION_NAME" --query 'Versions[?Version!=`$LATEST`].[Version,LastModified]' --output text | sort -k2 -r)
-          # KEEP_COUNT=0
-          # while read -r VER MOD; do
-          #   if [ "$VER" = "$VERSION" ]; then continue; fi
-          #   if echo "$CURRENT_ALIASED" | grep -qx "$VER"; then continue; fi
-          #   KEEP_COUNT=$((KEEP_COUNT+1))
-          #   if [ $KEEP_COUNT -le 5 ]; then continue; fi
-          #   echo "Deleting old version $VER"
-          #   aws lambda delete-function --function-name "$FUNCTION_NAME" --qualifier "$VER" || true
-          # done <<< "$ALL_VERSIONS"
+          echo "Done. Alias '$ALIAS_NAME' -> version $VERSION; PC=$PC on the version; old PC cleaned up."
