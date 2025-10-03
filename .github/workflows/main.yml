@@ -126,27 +126,44 @@ jobs:
             local keep="$1"
             local deleted_any=false
             local marker=""
+
             while :; do
               if [ -z "$marker" ]; then
                 RESP=$(aws lambda list-provisioned-concurrency-configs \
-                  --function-name "$FUNCTION_NAME" --output json || echo "{}")
+                  --function-name "$FUNCTION_NAME" \
+                  --output json 2>/dev/null || echo '{"ProvisionedConcurrencyConfigs":[]}')
               else
                 RESP=$(aws lambda list-provisioned-concurrency-configs \
-                  --function-name "$FUNCTION_NAME" --marker "$marker" --output json || echo "{}")
+                  --function-name "$FUNCTION_NAME" \
+                  --marker "$marker" \
+                  --output json 2>/dev/null || echo '{"ProvisionedConcurrencyConfigs":[]}')
               fi
 
-              QUALIFIERS=$(echo "$RESP" | jq -r --arg K "$keep" \
-                '.ProvisionedConcurrencyConfigs[]?.Qualifier | select(. != $K)')
+              # Pull only non-null, non-empty qualifiers not equal to $keep
+              QUALIFIERS=$(echo "$RESP" | jq -r --arg K "$keep" '
+                .ProvisionedConcurrencyConfigs
+                | map(.Qualifier // empty)
+                | map(select(. != "" and . != $K))
+                | .[]?
+              ')
+
               NEXT=$(echo "$RESP" | jq -r '.NextMarker // empty')
 
               if [ -n "$QUALIFIERS" ]; then
                 while IFS= read -r q; do
+                  # Extra safety: skip null/empty just in case
+                  if [ -z "$q" ] || [ "$q" = "null" ]; then
+                    echo "Skipping bogus qualifier: '$q'"
+                    continue
+                  fi
                   echo "Deleting PC on qualifier: $q"
                   aws lambda delete-provisioned-concurrency-config \
-                    --function-name "$FUNCTION_NAME" --qualifier "$q" || true
+                    --function-name "$FUNCTION_NAME" \
+                    --qualifier "$q" || true
+
                   deleted_any=true
 
-                  # Wait until gone to avoid races
+                  # Wait until that PC config is really gone
                   for i in $(seq 1 30); do
                     st=$(aws lambda get-provisioned-concurrency-config \
                       --function-name "$FUNCTION_NAME" \
@@ -162,66 +179,10 @@ jobs:
               marker="$NEXT"
             done
 
-            # Re-run once if we deleted anything (eventual consistency)
+            # One extra pass if we deleted anything (eventual consistency)
             if $deleted_any; then
               echo "Re-running prune to defeat eventual consistency…"
               prune_pc "$keep"
             fi
           }
           prune_pc "$VERSION"
-
-          echo "7) Remove any Application Auto Scaling policies/targets on NON-current qualifiers…"
-          # These can silently recreate PC after you delete it.
-          # ResourceId format: function:<FUNCTION_NAME>:<QUALIFIER>
-          POLICIES=$(aws application-autoscaling describe-scaling-policies \
-            --service-namespace lambda --output json || echo '{}')
-          TARGETS=$(aws application-autoscaling describe-scalable-targets \
-            --service-namespace lambda --output json || echo '{}')
-
-          # Delete scaling policies not matching current VERSION
-          echo "$POLICIES" | jq -r \
-            --arg FN "$FUNCTION_NAME" --arg VER "$VERSION" \
-            '.ScalingPolicies[]? | select(.ResourceId|startswith("function:\($FN):")) 
-             | select((.ResourceId|split(":")[-1]) != $VER) 
-             | "\(.PolicyName) \(.ResourceId)"' | while read -r pname rid; do
-              echo "Deleting scaling policy '$pname' on '$rid'"
-              aws application-autoscaling delete-scaling-policy \
-                --service-namespace lambda \
-                --policy-name "$pname" \
-                --resource-id "$rid" \
-                --scalable-dimension lambda:function:ProvisionedConcurrency || true
-            done
-
-          # Deregister scalable targets not matching current VERSION
-          echo "$TARGETS" | jq -r \
-            --arg FN "$FUNCTION_NAME" --arg VER "$VERSION" \
-            '.ScalableTargets[]? | select(.ResourceId|startswith("function:\($FN):")) 
-             | select((.ResourceId|split(":")[-1]) != $VER) 
-             | .ResourceId' | while read -r rid; do
-              echo "Deregistering scalable target on '$rid'"
-              aws application-autoscaling deregister-scalable-target \
-                --service-namespace lambda \
-                --resource-id "$rid" \
-                --scalable-dimension lambda:function:ProvisionedConcurrency || true
-            done
-
-          echo "8) (Optional) Prune old function versions (keep last 5) after PC is cleaned…"
-          KEPT=("$VERSION")
-          OTHERS=$(aws lambda list-versions-by-function \
-            --function-name "$FUNCTION_NAME" \
-            --query 'Versions[?Version!=`$LATEST`].[Version]' \
-            --output text | tr '\t' '\n' | sort -nr || true)
-
-          COUNT=0
-          for v in $OTHERS; do
-            [ "$v" = "$VERSION" ] && continue
-            COUNT=$((COUNT+1))
-            if [ $COUNT -le 4 ]; then
-              KEPT+=("$v")
-            else
-              echo "Deleting old version $v"
-              aws lambda delete-function --function-name "$FUNCTION_NAME" --qualifier "$v" || true
-            fi
-          done
-
-          echo "Done. Alias '$ALIAS_NAME' -> version $VERSION; only PC on version $VERSION remains."
