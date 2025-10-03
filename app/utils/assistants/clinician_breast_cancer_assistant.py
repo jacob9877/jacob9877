@@ -1,3 +1,5 @@
+import json
+
 from fastapi import HTTPException, status
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
@@ -6,7 +8,6 @@ from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.models.breast_cancer_patient_models import FEATURE_NAMES
 from app.models.conversation_models import AssistantSlug, Conversation
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.db import (
@@ -84,26 +85,11 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
 
     with db_connection_cm() as conn:
         with conn.cursor(dictionary=True) as cursor:
-            columns = (
-                ["diagnosis", "user_id"]  # Columns from breast_cancer_patients table
-                + FEATURE_NAMES  # Feature values from breast_cancer_patients table
-                + [
-                    f"contribution_{feature_name}" for feature_name in FEATURE_NAMES
-                ]  # Contribution values from breast_cancer_explanations table
-                + [
-                    "patient_id",
-                    "raw_probability",
-                    "threshold",
-                    "expected_value",
-                ]  # Columns from breast_cancer_explanations table
-            )
 
             operation = f"""
-                SELECT {", ".join(columns)} 
-                FROM breast_cancer_patients
-                INNER JOIN breast_cancer_explanations
-                    ON breast_cancer_patients.id = breast_cancer_explanations.patient_id
-                WHERE breast_cancer_explanations.patient_id = %s
+                SELECT explanation
+                FROM breast_cancer_explanations
+                WHERE patient_id = %s
             """
             params = (patient_id,)
             cursor.execute(operation, params)
@@ -121,29 +107,7 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
             detail="User is not authorized to access this patient's data",
         )
 
-    result = {
-        "feature_values": {},
-        "explanation": {
-            "raw_probability": row["raw_probability"],
-            "threshold": row["threshold"],
-            "diagnosis": (1 if row["raw_probability"] >= row["threshold"] else 0),
-            "expected_value": row["expected_value"],
-            "contributions": [],
-        },
-    }
-    for feature_name in FEATURE_NAMES:
-        result["feature_values"][feature_name] = row[feature_name]
-        contribution_value = row[f"contribution_{feature_name}"]
-        result["explanation"]["contributions"].append(
-            {
-                "feature": feature_name,
-                "value": contribution_value,
-                "magnitude": abs(contribution_value),
-                "direction": "up" if contribution_value > 0 else "down",
-            }
-        )
-
-    return result
+    return json.loads(row["explanation"])
 
 
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
