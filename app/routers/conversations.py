@@ -203,7 +203,7 @@ def get_user_conversations(
             where_clause = "user_id=%s"
             params = (current_user_id,)
             if assistant:
-                where_clause += "AND assistant=%s"
+                where_clause += " AND assistant=%s"
                 params = params + (assistant,)
 
             operation = f"""
