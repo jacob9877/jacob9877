@@ -121,37 +121,39 @@ jobs:
               --function-version "$VERSION"
           fi
 
-          echo "6) Deep-prune ALL other PC configs (versions AND aliases), with pagination and waits…"
-          prune_pc () {
+          echo "6) Deep prune ALL other PC configs (versions & aliases)…"
+
+          prune_pc() {
             local keep="$1"
-            local deleted_any=false
+            local did_delete=false
             local marker=""
 
-            while :; do
+            while : ; do
               if [ -z "$marker" ]; then
-                RESP=$(aws lambda list-provisioned-concurrency-configs \
+                resp=$(aws lambda list-provisioned-concurrency-configs \
                   --function-name "$FUNCTION_NAME" \
                   --output json 2>/dev/null || echo '{"ProvisionedConcurrencyConfigs":[]}')
               else
-                RESP=$(aws lambda list-provisioned-concurrency-configs \
+                resp=$(aws lambda list-provisioned-concurrency-configs \
                   --function-name "$FUNCTION_NAME" \
                   --marker "$marker" \
                   --output json 2>/dev/null || echo '{"ProvisionedConcurrencyConfigs":[]}')
               fi
 
-              # Pull only non-null, non-empty qualifiers not equal to $keep
-              QUALIFIERS=$(echo "$RESP" | jq -r --arg K "$keep" '
+              # Extract qualifier as the last ARN segment (handles versions AND aliases)
+              QUALIFIERS=$(echo "$resp" | jq -r --arg K "$keep" '
                 .ProvisionedConcurrencyConfigs
-                | map(.Qualifier // empty)
+                | map((.FunctionArn | split(":")[-1]) // empty)
                 | map(select(. != "" and . != $K))
+                | unique
                 | .[]?
               ')
 
-              NEXT=$(echo "$RESP" | jq -r '.NextMarker // empty')
+              NEXT=$(echo "$resp" | jq -r '.NextMarker // empty')
 
               if [ -n "$QUALIFIERS" ]; then
                 while IFS= read -r q; do
-                  # Extra safety: skip null/empty just in case
+                  # sanity guard
                   if [ -z "$q" ] || [ "$q" = "null" ]; then
                     echo "Skipping bogus qualifier: '$q'"
                     continue
@@ -161,7 +163,7 @@ jobs:
                     --function-name "$FUNCTION_NAME" \
                     --qualifier "$q" || true
 
-                  deleted_any=true
+                  did_delete=true
 
                   # Wait until that PC config is really gone
                   for i in $(seq 1 30); do
@@ -180,9 +182,34 @@ jobs:
             done
 
             # One extra pass if we deleted anything (eventual consistency)
-            if $deleted_any; then
+            if $did_delete; then
               echo "Re-running prune to defeat eventual consistency…"
               prune_pc "$keep"
             fi
           }
+
+          # Run prune, keeping only the freshly published version
           prune_pc "$VERSION"
+
+          echo "7) Assert only the new version still has PC…"
+          EXTRA_COUNT=$(
+            aws lambda list-provisioned-concurrency-configs \
+              --function-name "$FUNCTION_NAME" \
+              --output json 2>/dev/null \
+            | jq -r --arg K "$VERSION" '
+                .ProvisionedConcurrencyConfigs
+                | map((.FunctionArn | split(":")[-1]) // empty)
+                | map(select(. != "" and . != $K))
+                | length
+              '
+          )
+          if [ "${EXTRA_COUNT:-0}" -ne 0 ]; then
+            echo "ERROR: Found ${EXTRA_COUNT} extra provisioned concurrency configs after prune."
+            echo "Remaining configs:"
+            aws lambda list-provisioned-concurrency-configs \
+              --function-name "$FUNCTION_NAME" \
+              --output json | jq -r '.'
+            exit 1
+          fi
+
+          echo "Cleanup verified: only version $VERSION has provisioned concurrency."
