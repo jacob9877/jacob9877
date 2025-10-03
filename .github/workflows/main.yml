@@ -1,155 +1,188 @@
-name: Deploy FastAPI Lambda Container
+- name: Deploy, set PC on VERSION, repoint alias, and deep-prune PC
+  env:
+    ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+    FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+    REPO: ${{ secrets.ECR_REPOSITORY_NAME }}
+  run: |
+    set -euo pipefail
 
-on:
-  push:
-    branches: [main]
+    IMAGE_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
+    ALIAS_NAME="v2"
+    PC=1
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+    echo "0) Pre-clean: delete alias-level PC for '$ALIAS_NAME' (if any)…"
+    aws lambda delete-provisioned-concurrency-config \
+      --function-name "$FUNCTION_NAME" \
+      --qualifier "$ALIAS_NAME" || true
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    for i in $(seq 1 30); do
+      STATUS=$(aws lambda get-provisioned-concurrency-config \
+        --function-name "$FUNCTION_NAME" \
+        --qualifier "$ALIAS_NAME" \
+        --query 'Status' --output text 2>/dev/null || echo "MISSING")
+      [ "$STATUS" = "MISSING" ] && break
+      echo "Alias PC still present (status=$STATUS); waiting…"
+      sleep 2
+    done
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    echo "1) Update code & publish new version…"
+    VERSION=$(aws lambda update-function-code \
+      --function-name "$FUNCTION_NAME" \
+      --image-uri "$IMAGE_URI" \
+      --publish \
+      --query 'Version' --output text)
+    echo "Published version: $VERSION"
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+    echo "2) Wait for version to be ACTIVE…"
+    aws lambda wait published-version-active \
+      --function-name "$FUNCTION_NAME" \
+      --qualifier "$VERSION"
 
-      - name: Build, tag, and push Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPO: ${{ secrets.ECR_REPOSITORY_NAME }}
-        run: |
-          set -euo pipefail
-          IMAGE_SHA_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
-          IMAGE_LATEST_URI="$ECR_REGISTRY/$REPO:latest"
+    echo "3) Set provisioned concurrency ($PC) on version $VERSION…"
+    aws lambda put-provisioned-concurrency-config \
+      --function-name "$FUNCTION_NAME" \
+      --qualifier "$VERSION" \
+      --provisioned-concurrent-executions "$PC"
 
-          # Pin platform for Lambda if needed
-          docker build --platform linux/amd64 -t "$IMAGE_SHA_URI" -t "$IMAGE_LATEST_URI" .
-          docker push "$IMAGE_SHA_URI"
-          docker push "$IMAGE_LATEST_URI"
+    echo "4) Poll PC on $VERSION until READY…"
+    ATTEMPTS=60
+    SLEEP_SECS=10
+    for i in $(seq 1 $ATTEMPTS); do
+      STATUS=$(aws lambda get-provisioned-concurrency-config \
+        --function-name "$FUNCTION_NAME" \
+        --qualifier "$VERSION" \
+        --query 'Status' --output text 2>/dev/null || echo "MISSING")
+      if [ "$STATUS" = "READY" ]; then
+        echo "Provisioned concurrency is READY."
+        break
+      elif [ "$STATUS" = "FAILED" ]; then
+        REASON=$(aws lambda get-provisioned-concurrency-config \
+          --function-name "$FUNCTION_NAME" \
+          --qualifier "$VERSION" \
+          --query 'StatusReason' --output text || true)
+        echo "ERROR: PC FAILED: $REASON"
+        exit 1
+      else
+        echo "Status=$STATUS; retrying in ${SLEEP_SECS}s… ($i/$ATTEMPTS)"
+        sleep "$SLEEP_SECS"
+      fi
+    done
 
-      - name: Deploy, set PC on VERSION, poll READY, repoint alias, and hard cleanup
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
-          REPO: ${{ secrets.ECR_REPOSITORY_NAME }}
-        run: |
-          set -euo pipefail
+    echo "5) Point alias '$ALIAS_NAME' to version $VERSION (no weights)…"
+    if aws lambda get-alias --function-name "$FUNCTION_NAME" --name "$ALIAS_NAME" >/dev/null 2>&1; then
+      aws lambda update-alias \
+        --function-name "$FUNCTION_NAME" \
+        --name "$ALIAS_NAME" \
+        --function-version "$VERSION" \
+        --routing-config 'AdditionalVersionWeights={}'
+    else
+      aws lambda create-alias \
+        --function-name "$FUNCTION_NAME" \
+        --name "$ALIAS_NAME" \
+        --function-version "$VERSION"
+    fi
 
-          IMAGE_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
-          ALIAS_NAME="v2"
-          PC=1
+    echo "6) Deep-prune ALL other PC configs (versions AND aliases), with pagination and waits…"
+    prune_pc () {
+      local keep="$1"
+      local deleted_any=false
+      local marker=""
+      while :; do
+        if [ -z "$marker" ]; then
+          RESP=$(aws lambda list-provisioned-concurrency-configs \
+            --function-name "$FUNCTION_NAME" --output json || echo "{}")
+        else
+          RESP=$(aws lambda list-provisioned-concurrency-configs \
+            --function-name "$FUNCTION_NAME" --marker "$marker" --output json || echo "{}")
+        fi
 
-          echo "0) Pre-clean: delete alias PC (idempotent) to avoid conflicts…"
-          aws lambda delete-provisioned-concurrency-config \
-            --function-name "$FUNCTION_NAME" \
-            --qualifier "$ALIAS_NAME" || true
+        QUALIFIERS=$(echo "$RESP" | jq -r --arg K "$keep" \
+          '.ProvisionedConcurrencyConfigs[]?.Qualifier | select(. != $K)')
+        NEXT=$(echo "$RESP" | jq -r '.NextMarker // empty')
 
-          # Wait until alias PC is fully gone (eventual consistency guard)
-          for i in $(seq 1 30); do
-            STATUS=$(aws lambda get-provisioned-concurrency-config \
-              --function-name "$FUNCTION_NAME" \
-              --qualifier "$ALIAS_NAME" \
-              --query 'Status' --output text 2>/dev/null || echo "MISSING")
-            [ "$STATUS" = "MISSING" ] && break
-            echo "Alias PC still present (status=$STATUS), rechecking…"
-            sleep 2
-          done
+        if [ -n "$QUALIFIERS" ]; then
+          while IFS= read -r q; do
+            echo "Deleting PC on qualifier: $q"
+            aws lambda delete-provisioned-concurrency-config \
+              --function-name "$FUNCTION_NAME" --qualifier "$q" || true
+            deleted_any=true
 
-          echo "1) Update code & publish version…"
-          VERSION=$(
-            aws lambda update-function-code \
-              --function-name "$FUNCTION_NAME" \
-              --image-uri "$IMAGE_URI" \
-              --publish \
-              --query 'Version' \
-              --output text
-          )
-          echo "Published version: $VERSION"
-
-          echo "2) Wait for version to be ACTIVE…"
-          aws lambda wait published-version-active \
-            --function-name "$FUNCTION_NAME" \
-            --qualifier "$VERSION"
-
-          echo "3) Set provisioned concurrency ($PC) on VERSION $VERSION…"
-          aws lambda put-provisioned-concurrency-config \
-            --function-name "$FUNCTION_NAME" \
-            --qualifier "$VERSION" \
-            --provisioned-concurrent-executions "$PC"
-
-          echo "4) Poll until PC is READY…"
-          ATTEMPTS=60
-          SLEEP_SECS=10
-          for i in $(seq 1 $ATTEMPTS); do
-            STATUS=$(aws lambda get-provisioned-concurrency-config \
-              --function-name "$FUNCTION_NAME" \
-              --qualifier "$VERSION" \
-              --query 'Status' \
-              --output text 2>/dev/null || echo "MISSING")
-            if [ "$STATUS" = "READY" ]; then
-              echo "Provisioned concurrency is READY."
-              break
-            elif [ "$STATUS" = "FAILED" ]; then
-              REASON=$(aws lambda get-provisioned-concurrency-config \
+            # Wait until gone to avoid races
+            for i in $(seq 1 30); do
+              st=$(aws lambda get-provisioned-concurrency-config \
                 --function-name "$FUNCTION_NAME" \
-                --qualifier "$VERSION" \
-                --query 'StatusReason' \
-                --output text || true)
-              echo "ERROR: Provisioned concurrency FAILED: $REASON"
-              exit 1
-            else
-              echo "Status=$STATUS; retrying in ${SLEEP_SECS}s… ($i/$ATTEMPTS)"
-              sleep "$SLEEP_SECS"
-            fi
-          done
-
-          echo "5) Point alias '$ALIAS_NAME' -> version $VERSION (no weighted routing)…"
-          if aws lambda get-alias --function-name "$FUNCTION_NAME" --name "$ALIAS_NAME" >/dev/null 2>&1; then
-            aws lambda update-alias \
-              --function-name "$FUNCTION_NAME" \
-              --name "$ALIAS_NAME" \
-              --function-version "$VERSION" \
-              --routing-config 'AdditionalVersionWeights={}'
-          else
-            aws lambda create-alias \
-              --function-name "$FUNCTION_NAME" \
-              --name "$ALIAS_NAME" \
-              --function-version "$VERSION"
-          fi
-
-          echo "6) HARD CLEANUP: delete ALL other PC configs except version $VERSION…"
-          # Loop to defeat eventual consistency: re-list and re-delete until none remain
-          for round in $(seq 1 5); do
-            OTHER_PCS=$(aws lambda list-provisioned-concurrency-configs \
-              --function-name "$FUNCTION_NAME" \
-              --query "ProvisionedConcurrencyConfigs[?Qualifier!='${VERSION}'].Qualifier" \
-              --output text || true)
-
-            if [ -z "$OTHER_PCS" ]; then
-              echo "No extra PC configs remain. Cleanup complete."
-              break
-            fi
-
-            echo "Found extra PC configs (round $round): $OTHER_PCS"
-            for q in $OTHER_PCS; do
-              echo "Deleting PC on qualifier: $q"
-              aws lambda delete-provisioned-concurrency-config \
-                --function-name "$FUNCTION_NAME" \
-                --qualifier "$q" || true
+                --qualifier "$q" \
+                --query 'Status' --output text 2>/dev/null || echo "MISSING")
+              [ "$st" = "MISSING" ] && break
+              sleep 2
             done
+          done <<< "$QUALIFIERS"
+        fi
 
-            # Small backoff before re-listing
-            sleep 3
-          done
+        [ -z "$NEXT" ] && break
+        marker="$NEXT"
+      done
 
-          echo "Done. Alias '$ALIAS_NAME' -> version $VERSION; ONLY PC on version $VERSION remains."
+      # Re-run once if we deleted anything (eventual consistency)
+      if $deleted_any; then
+        echo "Re-running prune to defeat eventual consistency…"
+        prune_pc "$keep"
+      fi
+    }
+    prune_pc "$VERSION"
+
+    echo "7) Remove any Application Auto Scaling policies/targets on NON-current qualifiers…"
+    # These can silently recreate PC after you delete it.
+    # ResourceId format: function:<FUNCTION_NAME>:<QUALIFIER>
+    POLICIES=$(aws application-autoscaling describe-scaling-policies \
+      --service-namespace lambda --output json || echo '{}')
+    TARGETS=$(aws application-autoscaling describe-scalable-targets \
+      --service-namespace lambda --output json || echo '{}')
+
+    # Delete scaling policies not matching current VERSION
+    echo "$POLICIES" | jq -r \
+      --arg FN "$FUNCTION_NAME" --arg VER "$VERSION" \
+      '.ScalingPolicies[]? | select(.ResourceId|startswith("function:\($FN):")) 
+       | select((.ResourceId|split(":")[-1]) != $VER) 
+       | "\(.PolicyName) \(.ResourceId)"' | while read -r pname rid; do
+        echo "Deleting scaling policy '$pname' on '$rid'"
+        aws application-autoscaling delete-scaling-policy \
+          --service-namespace lambda \
+          --policy-name "$pname" \
+          --resource-id "$rid" \
+          --scalable-dimension lambda:function:ProvisionedConcurrency || true
+      done
+
+    # Deregister scalable targets not matching current VERSION
+    echo "$TARGETS" | jq -r \
+      --arg FN "$FUNCTION_NAME" --arg VER "$VERSION" \
+      '.ScalableTargets[]? | select(.ResourceId|startswith("function:\($FN):")) 
+       | select((.ResourceId|split(":")[-1]) != $VER) 
+       | .ResourceId' | while read -r rid; do
+        echo "Deregistering scalable target on '$rid'"
+        aws application-autoscaling deregister-scalable-target \
+          --service-namespace lambda \
+          --resource-id "$rid" \
+          --scalable-dimension lambda:function:ProvisionedConcurrency || true
+      done
+
+    echo "8) (Optional) Prune old function versions (keep last 5) after PC is cleaned…"
+    KEPT=("$VERSION")
+    OTHERS=$(aws lambda list-versions-by-function \
+      --function-name "$FUNCTION_NAME" \
+      --query 'Versions[?Version!=`$LATEST`].[Version]' \
+      --output text | tr '\t' '\n' | sort -nr || true)
+
+    COUNT=0
+    for v in $OTHERS; do
+      [ "$v" = "$VERSION" ] && continue
+      COUNT=$((COUNT+1))
+      if [ $COUNT -le 4 ]; then
+        KEPT+=("$v")
+      else
+        echo "Deleting old version $v"
+        aws lambda delete-function --function-name "$FUNCTION_NAME" --qualifier "$v" || true
+      fi
+    done
+
+    echo "Done. Alias '$ALIAS_NAME' -> version $VERSION; only PC on version $VERSION remains."
