@@ -478,14 +478,6 @@ def delete_patient(
             params = (patient_id,)
             cursor.execute(operation, params)
 
-            # Delete any associated images
-            operation = """
-                DELETE FROM pediatric_appendicitis_images
-                WHERE patient_id=%s
-            """
-            params = (patient_id,)
-            cursor.execute(operation, params)
-
         conn.commit()
 
         return
@@ -712,14 +704,6 @@ def delete_patients(
             operation = f"""
                 DELETE FROM pediatric_appendicitis_patients
                 WHERE id IN ({placeholders})
-            """
-            params = tuple(patient_ids)
-            cursor.execute(operation, params)
-
-            # Delete any images associated with the patients
-            operation = f"""
-                DELETE FROM pediatric_appendicitis_images
-                WHERE patient_id IN ({placeholders})
             """
             params = tuple(patient_ids)
             cursor.execute(operation, params)
