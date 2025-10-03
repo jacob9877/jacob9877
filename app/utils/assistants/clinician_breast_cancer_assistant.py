@@ -86,10 +86,13 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     with db_connection_cm() as conn:
         with conn.cursor(dictionary=True) as cursor:
 
-            operation = f"""
-                SELECT explanation
-                FROM breast_cancer_explanations
-                WHERE patient_id = %s
+            operation = """
+                SELECT bce.explanation,
+                    bcp.user_id
+                FROM breast_cancer_explanations AS bce
+                JOIN breast_cancer_patients AS bcp
+                ON bce.patient_id = bcp.id
+                WHERE bce.patient_id = %s
             """
             params = (patient_id,)
             cursor.execute(operation, params)

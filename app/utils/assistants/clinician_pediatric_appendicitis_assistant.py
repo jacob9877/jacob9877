@@ -1,3 +1,6 @@
+import json
+from typing import Literal
+
 from fastapi import HTTPException, status
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
@@ -63,6 +66,66 @@ class GetPatientExplanationInput(BaseModel):
         description="The integer ID (MySQL PK) of the pediatric appendicitis patient to retrieve explanation for",
         example=123,
     )
+    prediction: Literal["diagnosis", "management", "severity", "length_of_stay"] = (
+        Field(
+            ...,
+            description="The prediction to get an explanation for",
+            example="diagnosis",
+        )
+    )
+
+
+@tool(
+    description="Explain a pediatric appendicitis patient's prediction using SHAP analysis based on their patient ID. Call this tool when asked for any reasoning behind the predictions/diagnoses.",
+    args_schema=GetPatientExplanationInput,
+)
+def explain_diagnosis(
+    patient_id: int,
+    prediction: Literal["diagnosis", "management", "severity", "length_of_stay"],
+    *,
+    config: RunnableConfig,
+) -> dict:
+
+    # If the conversation is about a patient, make ture this tool call is about the same patient
+    if config["configurable"].get("patient_id") and patient_id != config[
+        "configurable"
+    ].get("patient_id"):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tool input patient_id does not match the patient_id of the conversation scope.",
+        )
+
+    explanation_column = f"{prediction}_explanation"
+
+    with db_connection_cm() as conn:
+        with conn.cursor(dictionary=True) as cursor:
+
+            operation = f"""
+                SELECT pae.{explanation_column},
+                    pap.user_id
+                FROM pediatric_appendicitis_explanations AS pae
+                JOIN pediatric_appendicitis_patients AS pap
+                ON pae.patient_id = pap.id
+                WHERE pae.patient_id = %s
+            """
+            params = (patient_id,)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No explanation for patient with ID {patient_id} found",
+        )
+
+    if row["user_id"] != config["configurable"].get("user_id"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not authorized to access this patient's data",
+        )
+
+    return json.loads(row[explanation_column])
 
 
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
@@ -93,6 +156,11 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
     def _get_system_prompt(self) -> str:
         prompt = """
             You are a specialized medical AI agent for doctors focused on pediatric appendicitis. You have access to comprehensive information about pediatric appendicitis and tools to gain information about patients to provide to doctor users.
+            You are part of a system that uses machine learning to predict the following about a given pediatric appendicitis patient:
+            1. Diagnosis: "appendicitis" or "no appendicitis"
+            2. Management: "conservative" or "surgical"
+            3. Severity: "complicated" or "uncomplicated"
+            4. Length of Stay: a numeric prediction of the length of stay in days, along with a 80% confidence prediction interval (lower and upper bound)
 
             IMPORTANT INSTRUCTIONS:
             1. Always prioritize information from the provided knowledge base and that can be obtained from the tools provided to you.
@@ -104,7 +172,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
             7. Focus specifically on pediatric appendicitis topics
             8. Keep responses brief. For example, one paragraph or up to 5 bullet points.
 
-             Please provide helpful, accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
+            Please provide helpful, accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
         """
         if self.conversation.patient_id:
             prompt += f"You are chatting with a doctor about breast cancer patient with ID {self.conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {self.conversation.patient_id}, and call the appropriate tools to gain relevant information."
@@ -117,7 +185,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
 
             agent = create_react_agent(
                 model=model,
-                tools=[get_patient_info],
+                tools=[get_patient_info, explain_diagnosis],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,
             )
