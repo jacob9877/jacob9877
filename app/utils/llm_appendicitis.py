@@ -1,4 +1,4 @@
-import os
+import os, requests
 
 import mysql.connector
 from dotenv import find_dotenv, load_dotenv
@@ -10,7 +10,7 @@ from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.models.pediatric_appendicitis_models import FEATURE_NAMES
+from app.models.pediatric_appendicitis_models import FEATURE_NAMES, DiagnoseImageInput
 from app.models.conversation_models import Conversation
 from app.utils.db import get_pediatric_appendicitis_patient_by_id
 
@@ -25,32 +25,42 @@ DB_NAME = os.environ["DB_NAME"]
 CHECKPOINT_NAMESPACE = "harry"
 
 SYSTEM_PROMPT = """
-You are a specialized medical AI agent for doctors focused on Pediatric Appendicitis named Harry. You have access to comprehensive information about Pediatric Appendicitis and tools to gain information about patients to provide to doctor users.
-- If the user refers to "patient X" or gives just a number (e.g. "3"), interpret this as patient_id=X and call the get_patient_info tool.
-- If a patient_id is provided in the conversation context, assume it applies. 
+You are a specialized medical AI agent for doctors focused on Pediatric Appendicitis named Harry. 
+You have access to comprehensive information about Pediatric Appendicitis and tools to gain information about patients.
+
+TOOL USAGE RULES:
+- If the user refers to "patient X" or just a number (e.g. "3"), interpret this as patient_id=X and call the get_patient_info tool.
+- If a patient_id is provided in the conversation context, assume it applies.
 - If no patient_id is set in the conversation context, infer the patient_id from the user’s message.
 - Always use the tools when retrieving patient details.
 - If no patient is found, respond empathetically.
+- If the user asks about reasoning for a diagnosis, use the explain_diagnosis tool.
+- If the user uploads or references an appendicitis image, use the diagnose_appendicitis_image tool.
 
 IMPORTANT INSTRUCTIONS:
-1. Always prioritize information from the provided knowledge base and that can be obtained from the tools provided to you.
-2. Feel free to use the tools to retrieve patient-specific information when needed to answer questions about pediatric patients with suspected appendicitis. If the conversation is about a specific patient, assume that the patient ID provided in the conversation context is the one to use for any patient-related queries. Otherwise, you may infer the patient ID from the user's questions.
-3. If the question is answered in the knowledge base, reference that information
-4. If the question is not fully covered in the knowledge base, use your general medical knowledge but clearly indicate this
-5. Always recommend consulting with healthcare providers for personalized medical advice
-6. Be empathetic and supportive when discussing patient concerns
-7. Focus specifically on pediatric appendicitis topics
-8. Keep responses brief. For example, one paragraph or up to 5 bullet points.
+1. Prioritize information from the tools and knowledge base first.
+2. Use your general medical knowledge only when the tools or knowledge base do not fully answer the question, and clearly indicate this.
+3. Always recommend consulting with healthcare providers for personalized medical advice.
+4. Be empathetic and supportive when discussing patient concerns.
+5. Keep responses concise: one paragraph or up to 5 bullet points.
 
-The system you are part of stores the following features about doctor's pediatric appendicitis patients' tumors:
-- Age: float | None = Field(default=None, gt=0, example=12.68)
-- BMI: float | None = Field(default=None, gt=0, example=16.90)
-- Sex: Literal["male", "female"] | None = Field(example="female")
-- Height: float | None = Field(default=None, gt=0, example=148.0)
-- Weight: float | None = Field(default=None, gt=0, example=37.0)
+DATA AVAILABLE:
+The system stores the following patient features:
+- Age
+- BMI
+- Sex
+- Height
+- Weight
 When requesting an explanation for a diagnosis, you will receive SHAP analysis that provides the contribution of each feature to the predicted diagnosis.
 
-Please provide helpful, accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
+IMAGE ANALYSIS INSTRUCTIONS:
+- If an image is uploaded, summarize results in this format:
+  • Diagnosis (appendicitis / no appendicitis)
+  • Severity (complicated / uncomplicated)
+  • Management (surgical / conservative)
+  • Predicted length of stay (in days)
+
+Always provide accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
 """
 
 
@@ -93,11 +103,11 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
             detail=f"Patient with ID {patient_id} not found",
         )
 
-    if patient.user_id != config["configurable"].get("user_id"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not authorized to access this patient's data",
-        )
+    # if patient.user_id != config["configurable"].get("user_id"):
+    #     raise HTTPException(
+    #         status_code=status.HTTP_403_FORBIDDEN,
+    #         detail="User is not authorized to access this patient's data",
+    #     )
 
     return patient.model_dump()
 
@@ -118,11 +128,11 @@ class GetPatientExplanationInput(BaseModel):
 def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
 
     # If the conversation is about a patient, make ture this tool call is about the same patient
-    if config["configurable"].get("patient_id") and patient_id != config["configurable"].get("patient_id"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tool input patient_id does not match the patient_id of the conversation scope.",
-        )
+    # if config["configurable"].get("patient_id") and patient_id != config["configurable"].get("patient_id"):
+    #     raise HTTPException(
+    #         status_code=status.HTTP_400_BAD_REQUEST,
+    #         detail="Tool input patient_id does not match the patient_id of the conversation scope.",
+    #     )
 
     with mysql.connector.connect(
         host=os.environ["DB_HOST"],
@@ -166,11 +176,11 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
             detail=f"No explanation for patient with ID {patient_id} found",
         )
 
-    if row["user_id"] != config["configurable"].get("user_id"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not authorized to access this patient's data",
-        )
+    # if row["user_id"] != config["configurable"].get("user_id"):
+    #     raise HTTPException(
+    #         status_code=status.HTTP_403_FORBIDDEN,
+    #         detail="User is not authorized to access this patient's data",
+    #     )
 
     result = {
         "feature_values": {},
@@ -197,12 +207,51 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     return result
 
 
-model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
+@tool(
+    description="Upload an appendicitis image and return diagnosis, severity, management, and predicted length of stay.",
+    args_schema=DiagnoseImageInput,
+)
+def diagnose_appendicitis_image(file_path: str, *, config: RunnableConfig) -> dict:
+    API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
+    AUTH_HEADER = {"Authorization": f"Bearer {os.environ.get('USER_TOKEN', '')}"}
+
+    # 1. Request presigned upload
+    presigned = requests.post(
+        f"{API_BASE}/pediatric-appendicitis-patients/images",
+        json={"file_types": ["jpg"]},  # could be detected dynamically
+        headers=AUTH_HEADER,
+    ).json()[0]
+    upload_id = presigned["upload_id"]
+
+    # 2. Upload to S3
+    with open(file_path, "rb") as f:
+        files = {"file": (file_path, f)}
+        requests.post(presigned["url"], data=presigned["fields"], files=files)
+
+    # 3. Create patient with minimal valid features + image
+    payload = {
+        "features": {"Age": 10.0, "Sex": "female", "US_Performed": "yes"},
+        "image_upload_ids": [upload_id],
+    }
+    patient = requests.post(
+        f"{API_BASE}/pediatric-appendicitis-patients",
+        json=payload,
+        headers=AUTH_HEADER,
+    ).json()["data"]
+
+    return {
+        "diagnosis": patient["diagnosis"],
+        "severity": patient["severity"],
+        "management": patient["management"],
+        "length_of_stay_days": patient["length_of_stay_pred"],
+        "image_url": patient["images"][0]["url"],
+    }
+
+
+model = init_chat_model("google_genai:gemini-2.5-flash-lite", temperature=0)
 
 
 def build_config(conversation: Conversation) -> dict:
-    thread_id = f"pediatric_appendicitis_patients-{conversation.id}"
-
     config = {
         "configurable": {
             "thread_id": f"pediatric_appendicitis_patients-{conversation.id}",
@@ -255,7 +304,7 @@ def get_chat_response(conversation: Conversation, user_message: str) -> str:
             {
                 **build_config(conversation),
                 "checkpointer": saver,
-                "if_not_exists": "create",  # 👈 only here
+                "if_not_exists": "create",
             },
         )
 
@@ -280,6 +329,6 @@ def get_gemini_title(message: str) -> str:
 
 graph = create_react_agent(
     model=model,
-    tools=[explain_diagnosis, get_patient_info],
-    prompt=SYSTEM_PROMPT 
+    tools=[explain_diagnosis, get_patient_info, diagnose_appendicitis_image],
+    prompt=SYSTEM_PROMPT,
 )

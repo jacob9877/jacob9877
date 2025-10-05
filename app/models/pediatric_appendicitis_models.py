@@ -159,3 +159,11 @@ class S3Uri(BaseModel):
 
 class PaginatedPediatricAppendicitisPatients(PaginatedResults):
     patients: list[PediatricAppendicitisPatient]
+
+
+class DiagnoseImageInput(BaseModel):
+    file_path: str = Field(
+        ...,
+        description="Local path to an appendicitis image file to upload and analyze",
+        example="/tmp/appendix_us.png",
+    )
