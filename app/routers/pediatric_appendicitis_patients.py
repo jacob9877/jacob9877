@@ -1,3 +1,4 @@
+import os
 import traceback
 import uuid
 from datetime import datetime
@@ -21,6 +22,7 @@ from app.models.pediatric_appendicitis_models import (
     UpsertPediatricAppendicitisPatientRequest,
 )
 from app.utils.aws import (
+    bulk_send_message_to_sqs,
     create_presigned_post_for_image,
     create_presigned_url,
     get_predictions,
@@ -43,6 +45,7 @@ router = APIRouter(
 
 IMAGES_BUCKET = "pediatric-appendicitis-images"
 SAGEMAKER_ENDPOINT_NAME = "pediatric-appendicitis"
+EXPLANATION_QUEUE_URL = os.environ["PEDIATRIC_APPENDICITIS_EXPLANATION_QUEUE_URL"]
 
 
 def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
@@ -55,6 +58,7 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
     description="Given a list of file extensions of images to be uploaded, returns a pre-signed URL with additional data for each of them",
     status_code=status.HTTP_201_CREATED,
     response_model=list[PresignedUpload],
+    response_model_by_alias=True,
     response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request)",
 )
 def create_presigned_uploads(
@@ -231,6 +235,21 @@ def add_patient(
         )
 
         conn.commit()
+
+        # Send the new patient info to SQS for explanation processing
+        features = {
+            "Diagnosis": predictions_validated.diagnosis,
+            "Management": predictions_validated.management,
+            "Severity": predictions_validated.severity,
+        } | patient_with_images.model_dump(include=set(FEATURE_NAMES))
+        messages = [
+            {
+                "patient_id": new_patient.id,
+                "features": features,
+                "image_uris": [image_uri.model_dump() for image_uri in image_s3_uris],
+            }
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
         return ResponseModel[PediatricAppendicitisPatientWithImages](
             data=patient_with_images,
@@ -459,14 +478,6 @@ def delete_patient(
             params = (patient_id,)
             cursor.execute(operation, params)
 
-            # Delete any associated images
-            operation = """
-                DELETE FROM pediatric_appendicitis_images
-                WHERE patient_id=%s
-            """
-            params = (patient_id,)
-            cursor.execute(operation, params)
-
         conn.commit()
 
         return
@@ -621,6 +632,87 @@ def update_patient(
         return ResponseModel[PediatricAppendicitisPatientWithImages](
             data=patient_with_images,
             detail="Patient updated, predictions obtained, and URLs created successfully",
+        )
+
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise e
+
+
+@router.delete(
+    "",
+    summary="Delete multiple patients by IDs",
+    description="Deletes the patients whose IDs are provided",
+    response_model=ResponseModel[list[int]],
+    response_description="Returns the list of IDs that were deleted",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to perform the requested action",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "One or more patient IDs not found",
+        },
+    },
+)
+def delete_patients(
+    patient_ids: list[int] = Query(
+        ...,
+        min_items=1,
+        description="List of patient IDs to delete",
+        example="ids=1&ids=2&ids=3",
+    ),
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+
+            # Verify all IDs exist
+            placeholders = ",".join(["%s"] * len(patient_ids))
+            operation = f"""
+                SELECT id, user_id
+                FROM pediatric_appendicitis_patients
+                WHERE id IN ({placeholders})
+            """
+            params = tuple(patient_ids)
+            cursor.execute(operation, params)
+
+            rows = cursor.fetchall()
+
+            found_ids = [row["id"] for row in rows]
+            missing_ids = [pid for pid in patient_ids if pid not in found_ids]
+            if missing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Patient IDs not found: {missing_ids}",
+                )
+
+            forbidden_ids = [
+                row["id"] for row in rows if row["user_id"] != current_user_id
+            ]
+            if forbidden_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Not authorized to delete these patients {forbidden_ids}",
+                )
+
+            # Perform delete
+            operation = f"""
+                DELETE FROM pediatric_appendicitis_patients
+                WHERE id IN ({placeholders})
+            """
+            params = tuple(patient_ids)
+            cursor.execute(operation, params)
+
+        conn.commit()
+
+        return ResponseModel[list[int]](
+            data=patient_ids,
+            detail=f"Deleted {len(patient_ids)} patients successfully",
         )
 
     except Exception as e:

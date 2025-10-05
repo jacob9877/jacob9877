@@ -1,8 +1,11 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 from app.models.chat_models import Message
+
+AssistantSlug = Literal["clinician-breast-cancer", "clinician-pediatric-appendicitis"]
 
 
 class ConversationSummary(BaseModel):
@@ -18,11 +21,13 @@ class Conversation(BaseModel):
     created_at: datetime
     updated_at: datetime
     patient_id: int | None = None  # If the conversation is patient-specific
+    assistant: AssistantSlug
 
 
 class StartConversationRequest(BaseModel):
     user_message: str
     patient_id: int | None = None  # If the conversation is patient-specific
+    assistant: AssistantSlug
 
 
 class StartConversationResponse(BaseModel):

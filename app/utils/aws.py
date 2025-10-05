@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 
 import backoff
@@ -90,7 +91,13 @@ def create_presigned_post_for_image(
     if not content_type:
         raise ValueError(f"Unsupported file type: {file_type}")
 
-    s3 = boto3.client("s3")
+    s3 = boto3.client(
+        "s3",
+        region_name=os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "us-east-1",
+        config=Config(signature_version="s3v4"),
+    )
 
     fields = {
         "key": key,

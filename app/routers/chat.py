@@ -6,13 +6,13 @@ from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
-from app.utils.db import get_breast_cancer_conversation_by_id, get_db_connection
+from app.utils.assistants.mapping import assistant_mapping
+from app.utils.db import get_conversation_by_id, get_db_connection
 from app.utils.jwt import get_and_validate_current_user_id
-from app.utils.llm import get_chat_response
 
 router = APIRouter(
-    prefix="/breast-cancer-chat",
-    tags=["Breast Cancer Chat"],
+    prefix="/chat",
+    tags=["Chat"],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],
@@ -26,9 +26,9 @@ def _insert_message(
     cursor: MySQLCursorDict, conversation_id: int, role: str, content: str
 ):
     operation = """
-        INSERT INTO breast_cancer_messages (conversation_id, role, content, message_order)
+        INSERT INTO messages (conversation_id, role, content, message_order)
         SELECT %s, %s, %s, COALESCE(MAX(message_order), 0) + 1
-        FROM breast_cancer_messages
+        FROM messages
         WHERE conversation_id = %s
     """
     params = (conversation_id, role, content, conversation_id)
@@ -61,9 +61,7 @@ def chat_agent(
     try:
         with conn.cursor(dictionary=True) as cursor:
 
-            conversation = get_breast_cancer_conversation_by_id(
-                cursor, request.conversation_id
-            )
+            conversation = get_conversation_by_id(cursor, request.conversation_id)
 
             # User provided a conversation ID but it doesn't exist
             if request.conversation_id and not conversation:
@@ -78,10 +76,8 @@ def chat_agent(
                     detail=f"Not authorized to access conversation {request.conversation_id}",
                 )
 
-            assistant_reply = get_chat_response(
-                conversation,
-                request.user_message,
-            )
+            assistant = assistant_mapping[conversation.assistant](conversation)
+            assistant_reply = assistant.invoke(request.user_message)
 
             _insert_message(
                 cursor, request.conversation_id, "user", request.user_message

@@ -53,9 +53,9 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(breast_cancer_patients.router)
 app.include_router(pediatric_appendicitis_patients.router)
-app.include_router(mortality_patients.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
+app.include_router(mortality_patients.router)
 
 app.add_middleware(
     CORSMiddleware,
