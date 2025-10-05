@@ -53,7 +53,7 @@ class PediatricAppendicitisPatientFeatures(BaseModel):
     Paedriatic_Appendicitis_Score: int = Field(gte=0, example=3)
 
     # Clinical
-    Peritonitis: Literal["yes", "no"] = Field(example="no")
+    Peritonitis: Literal["no", "local", "generalized"] = Field(example="no")
     Migratory_Pain: Literal["yes", "no"] = Field(example="no")
     Lower_Right_Abd_Pain: Literal["yes", "no"] = Field(example="yes")
     Contralateral_Rebound_Tenderness: Literal["yes", "no"] = Field(example="yes")
