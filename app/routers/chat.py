@@ -101,7 +101,7 @@ def chat_agent(
         raise e
 
 
-@router.post(
+@router.get(
     "/suggestions",
     summary="Get chat suggestions",
     description="Generate chat suggestions given the discipline/assistant. Uses a programmatic approach to recommend potentially useful questions",
