@@ -1,11 +1,12 @@
 import traceback
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
+from app.models.conversation_models import AssistantSlug
 from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import get_conversation_by_id, get_db_connection
 from app.utils.jwt import get_and_validate_current_user_id
@@ -98,3 +99,69 @@ def chat_agent(
         conn.rollback()
         traceback.print_exc()
         raise e
+
+
+@router.post(
+    "/suggestions",
+    summary="Get chat suggestions",
+    description="Generate chat suggestions given the discipline/assistant. Uses a programmatic approach to recommend potentially useful questions",
+    response_model=ResponseModel[list[str]],
+    response_description="Returns a list of suggestions (str)",
+    status_code=status.HTTP_200_OK,
+)
+def get_chat_suggestions(
+    assistant: AssistantSlug = Query(...),
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(get_and_validate_current_user_id),
+):
+
+    suggestions: list[str] = []
+    with conn.cursor(dictionary=True) as cursor:
+
+        if assistant == "clinician-breast-cancer":
+            operation = """
+                SELECT p.id
+                FROM breast_cancer_patients AS p
+                JOIN breast_cancer_explanations AS e
+                ON e.patient_id = p.id
+                WHERE p.user_id = %s
+                ORDER BY p.updated_at DESC
+                LIMIT 1;
+            """
+            params = (current_user_id,)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+            if row is not None:
+                patient_id = row["id"]
+                suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
+                suggestions.append(suggestion)
+
+        else:
+            operation = """
+                SELECT p.id, p.diagnosis, p.management
+                FROM pediatric_appendicitis_patients AS p
+                JOIN pediatric_appendicitis_explanations AS e
+                ON e.patient_id = p.id
+                WHERE p.user_id = %s
+                ORDER BY p.updated_at DESC
+                LIMIT 1;
+            """
+            params = (current_user_id,)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+            if row is not None:
+                patient_id = row["id"]
+                # If one of the patient's outcomes is the positive class, tell them to ask for explanation
+                if row["diagnosis"] == "appendicitis":
+                    suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
+                elif row["management"] == "surgical":
+                    suggestion = f"Can you explain patient {patient_id}'s management?"
+                # If both diagnosis and management are negative class, default to diagnosis explanation
+                else:
+                    suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
+                suggestions.append(suggestion)
+
+    return ResponseModel[list[str]](
+        detail="No suggestions available" if len(suggestions) == 0 else "",
+        data=suggestions,
+    )
