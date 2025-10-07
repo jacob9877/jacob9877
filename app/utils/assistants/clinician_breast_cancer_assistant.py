@@ -1,5 +1,7 @@
 import json
+from typing import Literal
 
+import requests
 from fastapi import HTTPException, status
 from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
@@ -115,6 +117,84 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     return json.loads(row["explanation"])
 
 
+OverallStatusOptions = Literal[
+    "ACTIVE_NOT_RECRUITING",
+    "COMPLETED",
+    "ENROLLING_BY_INVITATION",
+    "NOT_YET_RECRUITING",
+    "RECRUITING",
+    "SUSPENDED",
+    "TERMINATED",
+    "WITHDRAWN",
+    "AVAILABLE",
+    "NO_LONGER_AVAILABLE",
+    "TEMPORARILY_NOT_AVAILABLE",
+    "APPROVED_FOR_MARKETING",
+    "WITHHELD",
+    "UNKNOWN",
+]
+
+
+class GetClinicalTrialsInput(BaseModel):
+    condition: str = Field(
+        ...,
+        description="Name of the condition the clinical trial is for",
+        example="lung cancer",
+    )
+    overall_status: list[OverallStatusOptions] = Field(
+        default=["NOT_YET_RECRUITING", "RECRUITING"],
+        description="Status of clinical trials to filter by, e.g. if the trial is recruiting then it will be status 'RECRUITING'.",
+        example=["NOT_YET_RECRUITING", "RECRUITING"],
+    )
+
+
+@tool(
+    description="Get current data about clinical trials using clinicaltrials.gov API. Returns a list of summaries about clinical trials satisfying the filter criteria.",
+    args_schema=GetClinicalTrialsInput,
+)
+def get_clinical_trials(
+    condition: str,
+    overall_status: list[OverallStatusOptions] = None,
+) -> list[dict]:
+
+    if overall_status is None:
+        overall_status = ["NOT_YET_RECRUITING", "RECRUITING"]
+
+    fields = [
+        "NCTId",
+        "BriefTitle",
+        "Acronym",
+        "OverallStatus",
+        "Condition",
+        "PrimaryOutcomeMeasure",
+        "PrimaryOutcomeTimeFrame",
+        "LeadSponsorName",
+        "CollaboratorName",
+        "Sex",
+        "MinimumAge",
+        "MaximumAge",
+        "StudyType",
+        "LastUpdatePostDate",
+    ]
+    query_params = {
+        "query.cond": condition,
+        "query.locn": "florida",
+        "filter.overallStatus": "|".join(overall_status),
+        "fields": "|".join(fields),
+        "sort": "LastUpdatePostDate",
+    }
+
+    response = requests.get(
+        "https://clinicaltrials.gov/api/v2/studies", params=query_params
+    )
+
+    response.raise_for_status()
+
+    response_body = response.json()
+    studies = response_body["studies"]
+    return studies
+
+
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
 
@@ -176,7 +256,7 @@ class ClinicianBreastCancerAssistant(Assistant):
 
             agent = create_react_agent(
                 model=model,
-                tools=[explain_diagnosis, get_patient_info],
+                tools=[explain_diagnosis, get_patient_info, get_clinical_trials],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,
             )
