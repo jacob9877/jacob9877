@@ -32,7 +32,9 @@ class GetPatientInfoInput(BaseModel):
 )
 def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
 
-    if patient_id != config["configurable"].get("patient_id"):
+    if config["configurable"].get("patient_id") and patient_id != config[
+        "configurable"
+    ].get("patient_id"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
