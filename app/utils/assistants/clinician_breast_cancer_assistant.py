@@ -219,7 +219,7 @@ def get_clinical_trial_by_id(nct_id: str) -> dict:
     return response_body
 
 
-model = init_chat_model("google_genai:gemini-2.5-flash-lite", temperature=0)
+model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
 
 class ClinicianBreastCancerAssistant(Assistant):

@@ -81,9 +81,8 @@ def start_conversation(
                         detail=f"Not authorized to chat about patient with ID {request.patient_id}",
                     )
 
-            conversation_title = assistant_mapping[request.assistant].get_title(
-                request.user_message
-            )
+            assistant_class = assistant_mapping[request.assistant]
+            conversation_title = assistant_class.get_title(request.user_message)
 
             operation = """
                 INSERT INTO conversations (user_id, patient_id, title, assistant)
