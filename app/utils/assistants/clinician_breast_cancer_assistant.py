@@ -141,22 +141,23 @@ class GetClinicalTrialsInput(BaseModel):
         description="Name of the condition the clinical trial is for",
         example="lung cancer",
     )
-    overall_status: list[OverallStatusOptions] = Field(
-        default=["NOT_YET_RECRUITING", "RECRUITING"],
-        description="Status of clinical trials to filter by, e.g. if the trial is recruiting then it will be status 'RECRUITING'.",
+    overall_status: list[OverallStatusOptions] | None = Field(
+        default=None,
+        description="Status of clinical trials to filter by, e.g. if the trial is recruiting then it will be status 'RECRUITING'. This is not a required field and actually shouldn't be provided unless you actually need to filter by a different clinical trial status.",
         example=["NOT_YET_RECRUITING", "RECRUITING"],
     )
 
 
 @tool(
-    description="Get current data about clinical trials using clinicaltrials.gov API. Returns a list of summaries about clinical trials satisfying the filter criteria.",
+    description="Get current data about clinical trials using clinicaltrials.gov API. Returns a list of summaries about clinical trials satisfying the filter criteria sorted in descending order by LastUpdatePostDate.",
     args_schema=GetClinicalTrialsInput,
 )
 def get_clinical_trials(
     condition: str,
-    overall_status: list[OverallStatusOptions] = None,
+    overall_status: list[OverallStatusOptions] | None = None,
 ) -> list[dict]:
 
+    # Default overall_status
     if overall_status is None:
         overall_status = ["NOT_YET_RECRUITING", "RECRUITING"]
 
@@ -181,18 +182,41 @@ def get_clinical_trials(
         "query.locn": "florida",
         "filter.overallStatus": "|".join(overall_status),
         "fields": "|".join(fields),
-        "sort": "LastUpdatePostDate",
+        "sort": "LastUpdatePostDate",  # Sort by most recent LastUpdatePostDate
     }
 
     response = requests.get(
         "https://clinicaltrials.gov/api/v2/studies", params=query_params
-    )
+    )  # Must use requests library because API returns 403 when using httpx
 
     response.raise_for_status()
 
     response_body = response.json()
     studies = response_body["studies"]
     return studies
+
+
+class GetClinicalTrialByNCTIdInput(BaseModel):
+    nct_id: str = Field(
+        pattern=r"^[Nn][Cc][Tt]0*[1-9]\d{0,7}$",
+        description="NCT Number of a study. Basically the ID of a clinical trial.",
+    )
+
+
+@tool(
+    description="Get complete information about a clinical trial by its NCT Number/Id. This tool should be used if more information about the clinical trial is required beyond what is provided in the summary.",
+    args_schema=GetClinicalTrialByNCTIdInput,
+)
+def get_clinical_trial_by_id(nct_id: str) -> dict:
+
+    response = requests.get(
+        f"https://clinicaltrials.gov/api/v2/studies/{nct_id}",
+        allow_redirects=True,  # Allow redirects because the API may return 301 redirect to the study info
+    )  # Must use requests library because API returns 403 when using httpx
+    response.raise_for_status()
+
+    response_body = response.json()
+    return response_body
 
 
 model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
@@ -256,7 +280,12 @@ class ClinicianBreastCancerAssistant(Assistant):
 
             agent = create_react_agent(
                 model=model,
-                tools=[explain_diagnosis, get_patient_info, get_clinical_trials],
+                tools=[
+                    explain_diagnosis,
+                    get_patient_info,
+                    get_clinical_trials,
+                    get_clinical_trial_by_id,
+                ],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,
             )
