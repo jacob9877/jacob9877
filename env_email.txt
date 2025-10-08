@@ -1,9 +1,0 @@
-JWT_SECRET=dev_secret_key
-ALGORITHM=HS256
-MAIL_USERNAME=aiforbariatricsurgery@gmail.com
-MAIL_PASSWORD=qsgzfoftqygzrana   # App Password generated from google account
-MAIL_FROM=aiforbariatricsurgery@gmail.com
-MAIL_PORT=587
-MAIL_SERVER=smtp.gmail.com
-FRONTEND_URL=  # insert deployed frontend URL here
-
