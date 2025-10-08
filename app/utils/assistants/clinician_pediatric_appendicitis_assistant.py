@@ -132,7 +132,6 @@ model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
 
 
 class ClinicianPediatricAppendicitisAssistant(Assistant):
-
     def __init__(self, conversation: Conversation) -> None:
         self.conversation = conversation
 
@@ -175,7 +174,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
             Please provide helpful, accurate information about pediatric appendicitis while emphasizing the importance of professional medical consultation.
         """
         if self.conversation.patient_id:
-            prompt += f"You are chatting with a doctor about breast cancer patient with ID {self.conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {self.conversation.patient_id}, and call the appropriate tools to gain relevant information."
+            prompt += f"You are chatting with a doctor about pediatric appendicitis patient with ID {self.conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {self.conversation.patient_id}, and call the appropriate tools to gain relevant information."
         return prompt
 
     def invoke(self, user_message: str) -> str:
