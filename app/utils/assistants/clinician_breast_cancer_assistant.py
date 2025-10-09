@@ -3,7 +3,6 @@ from typing import Literal
 
 import requests
 from fastapi import HTTPException, status
-from langchain.chat_models import init_chat_model
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.checkpoint.mysql.pymysql import PyMySQLSaver
@@ -12,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.models.conversation_models import AssistantSlug, Conversation
 from app.utils.assistants.base_assistant import Assistant
+from app.utils.assistants.llm import llm
 from app.utils.db import (
     db_connection_cm,
     get_breast_cancer_patient_by_id,
@@ -219,9 +219,6 @@ def get_clinical_trial_by_id(nct_id: str) -> dict:
     return response_body
 
 
-model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
-
-
 class ClinicianBreastCancerAssistant(Assistant):
 
     def __init__(self, conversation: Conversation) -> None:
@@ -279,7 +276,7 @@ class ClinicianBreastCancerAssistant(Assistant):
         with PyMySQLSaver.from_conn_string(get_db_connection_string()) as saver:
 
             agent = create_react_agent(
-                model=model,
+                model=llm,
                 tools=[
                     explain_diagnosis,
                     get_patient_info,
@@ -316,5 +313,5 @@ class ClinicianBreastCancerAssistant(Assistant):
             The casing should be that of a sentence: The first word should be capitalized but everything else (except names) should be lowercase
         """
         messages = [("system", prompt), ("human", message)]
-        response = model.invoke(messages)
+        response = llm.invoke(messages)
         return response.content

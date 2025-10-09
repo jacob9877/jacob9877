@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.models.conversation_models import AssistantSlug, Conversation
 from app.utils.assistants.base_assistant import Assistant
+from app.utils.assistants.llm import llm
 from app.utils.db import (
     db_connection_cm,
     get_db_connection_string,
@@ -128,9 +129,6 @@ def explain_diagnosis(
     return json.loads(row[explanation_column])
 
 
-model = init_chat_model("google_genai:gemini-2.0-flash-lite", temperature=0)
-
-
 class ClinicianPediatricAppendicitisAssistant(Assistant):
     def __init__(self, conversation: Conversation) -> None:
         self.conversation = conversation
@@ -183,7 +181,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         with PyMySQLSaver.from_conn_string(get_db_connection_string()) as saver:
 
             agent = create_react_agent(
-                model=model,
+                model=llm,
                 tools=[get_patient_info, explain_diagnosis],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,
@@ -215,5 +213,5 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
             The casing should be that of a sentence: The first word should be capitalized but everything else (except names) should be lowercase
         """
         messages = [("system", prompt), ("human", message)]
-        response = model.invoke(messages)
+        response = llm.invoke(messages)
         return response.content
