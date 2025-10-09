@@ -42,4 +42,3 @@ async def send_reset_email(email: EmailStr, token: str):
 
     fm = FastMail(conf)
     await fm.send_message(message)
-    await fm.send_message(message)
