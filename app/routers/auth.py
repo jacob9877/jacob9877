@@ -190,6 +190,11 @@ def me(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
             )
     return ResponseModel[MeResponse](
-        data=MeResponse(username=current_user.username, email=current_user.email),
+        data=MeResponse(
+            username=current_user.username,
+            email=current_user.email,
+            role=current_user.role,
+            condition=current_user.condition,
+        ),
         detail="Info retrieved successfully",
     )
