@@ -12,7 +12,6 @@ from app.routers import (
     breast_cancer_patients,
     chat,
     conversations,
-    mortality_patients,
     pediatric_appendicitis_patients,
     users,
 )
@@ -20,8 +19,8 @@ from app.routers import (
 load_dotenv(find_dotenv(), override=True)
 
 app = FastAPI(
-    root_path="/beta",
-    title="AI for Bariatric Surgery API",
+    root_path="/v2",
+    title="AI for Medical Outcomes API",
     description="All responses except auto-thrown 422 codes will follow standard response model with keys 'data' and 'detail'. Never infer anything about the value of the 'detail' key, use the status code instead.",
     responses={
         status.HTTP_500_INTERNAL_SERVER_ERROR: {
@@ -55,7 +54,6 @@ app.include_router(breast_cancer_patients.router)
 app.include_router(pediatric_appendicitis_patients.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
-app.include_router(mortality_patients.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,7 +66,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the AI for Bariatric Surgery API!"}
+    return {"message": "Welcome to the AI for Medical Outcomes API!"}
 
 
 handler = Mangum(app)

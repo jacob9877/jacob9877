@@ -28,8 +28,12 @@ from app.utils.aws import (
     get_predictions,
     s3_file_exists,
 )
-from app.utils.db import get_db_connection, get_pediatric_appendicitis_patient_by_id
-from app.utils.jwt import get_and_validate_current_user_id
+from app.utils.db import (
+    get_db_connection,
+    get_pediatric_appendicitis_patient_by_id,
+    insert_pending_email,
+)
+from app.utils.jwt import clinicians_only, require_access
 from app.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(
@@ -64,7 +68,7 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
 def create_presigned_uploads(
     request: CreateImagesRequest,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -182,7 +186,7 @@ def _insert_patient(
 def add_patient(
     add_patient_request: UpsertPediatricAppendicitisPatientRequest,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
 
     try:
@@ -222,6 +226,14 @@ def add_patient(
                     current_user_id,
                 )
                 cursor.execute(operation, params)
+
+            if add_patient_request.email:
+                insert_pending_email(
+                    cursor,
+                    add_patient_request.email,
+                    new_patient.id,
+                    "pediatric_appendicitis_patients",
+                )
 
         images: list[ImageResponse] = []
         for upload_id, image_s3_uri in zip(
@@ -282,7 +294,7 @@ def add_patient(
 def get_patient(
     patient_id: int = Path(..., description="ID of the patient to get"),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -365,7 +377,7 @@ def get_pediatric_appendicitis_patients_paginated(
         description="Max number of patients to return (1–100)",
     ),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         # Order is (updated_at DESC, id DESC).
@@ -374,7 +386,7 @@ def get_pediatric_appendicitis_patients_paginated(
         operation = """
             SELECT *
             FROM pediatric_appendicitis_patients
-            WHERE user_id = %s
+            WHERE clinician_user_id = %s
         """
 
         params = [current_user_id]
@@ -451,7 +463,7 @@ def get_pediatric_appendicitis_patients_paginated(
 def delete_patient(
     patient_id: int,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -545,7 +557,7 @@ def update_patient(
     patient_id: int,
     update_patient_request: UpsertPediatricAppendicitisPatientRequest,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -602,6 +614,14 @@ def update_patient(
                 update_patient_request.features,
                 predictions_validated,
             )
+
+            if update_patient_request.email:
+                insert_pending_email(
+                    cursor,
+                    update_patient_request.email,
+                    new_patient.id,
+                    target_patient_table="pediatric_appendicitis_patients",
+                )
 
             if image_upload_ids:
                 # Update the images to link them to the new patient
@@ -666,7 +686,7 @@ def delete_patients(
         example="ids=1&ids=2&ids=3",
     ),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:

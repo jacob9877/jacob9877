@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Literal, NamedTuple
 
 import jwt
 from dotenv import find_dotenv, load_dotenv
@@ -8,7 +9,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mysql.connector import MySQLConnection
 
 from app.models.auth_models import TokenPayload, TokenType
-from app.utils.db import get_db_connection, user_exists
+from app.models.user_models import Condition, Role, RoleAndCondition, User
+from app.utils.db import get_db_connection, get_user_by_id
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -100,10 +102,10 @@ security = HTTPBearer(
 )  # Override to prevent automatic 403 response which isn't really semantically correct
 
 
-def get_and_validate_current_user_id(
+def get_and_validate_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     conn: MySQLConnection = Depends(get_db_connection),
-) -> int:
+) -> User:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token"
@@ -112,8 +114,63 @@ def get_and_validate_current_user_id(
     payload = decode_and_validate_jwt(token, expected_token_type=TokenType.ACCESS)
     user_id = int(payload.sub)
     with conn.cursor(dictionary=True) as cursor:
-        if not user_exists(cursor, user_id):
+        user = get_user_by_id(cursor, user_id)
+        if user is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
             )
-    return user_id
+    return user
+
+
+class AccessPolicy(NamedTuple):
+    allow_clinicians: bool = False
+    patient_conditions: set[Condition] | None = None
+    # patient_conditions:
+    #   - None  -> patients not allowed
+    #   - set{} -> only these patient conditions allowed
+
+
+def require_access(policy: AccessPolicy):
+    """
+    Dependency that enforces the given access policy and returns the id of the authenticated user.
+    """
+
+    def _dependency(user: User = Depends(get_and_validate_current_user)) -> int:
+        if user.role == Role.CLINICIAN:
+            if policy.allow_clinicians:
+                return user.id
+            raise HTTPException(status_code=403, detail="Clinician access not allowed")
+
+        if user.role == Role.PATIENT:
+            if policy.patient_conditions is None:
+                raise HTTPException(
+                    status_code=403, detail="Patient access not allowed"
+                )
+            if user.condition in policy.patient_conditions:
+                return user.id
+            raise HTTPException(
+                status_code=403,
+                detail=f"Patient condition '{user.condition}' not allowed",
+            )
+        raise HTTPException(status_code=403, detail="Unsupported role")
+
+    return _dependency
+
+
+def clinicians_only() -> AccessPolicy:
+    return AccessPolicy(allow_clinicians=True, patient_conditions=None)
+
+
+def patients_with(conditions: set[Condition]) -> AccessPolicy:
+    return AccessPolicy(allow_clinicians=False, patient_conditions=conditions)
+
+
+def clinicians_or_patients_with(conditions: set[Condition]) -> AccessPolicy:
+    return AccessPolicy(allow_clinicians=True, patient_conditions=conditions)
+
+
+ALL_CONDITIONS = {Condition.BREAST_CANCER, Condition.PEDIATRIC_APPENDICITIS}
+
+
+def all_registered_users() -> AccessPolicy:
+    return AccessPolicy(allow_clinicians=True, patient_conditions=ALL_CONDITIONS)

@@ -9,7 +9,7 @@ from app.models.common_models import ResponseModel
 from app.models.conversation_models import AssistantSlug
 from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import get_conversation_by_id, get_db_connection
-from app.utils.jwt import get_and_validate_current_user_id
+from app.utils.jwt import all_registered_users, require_access
 
 router = APIRouter(
     prefix="/chat",
@@ -57,7 +57,7 @@ def _insert_message(
 def chat_agent(
     request: ChatRequest,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(all_registered_users())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -112,9 +112,10 @@ def chat_agent(
 def get_chat_suggestions(
     assistant: AssistantSlug = Query(...),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(all_registered_users())),
 ):
 
+    # Now we need to determine if the user has access to the assistant
     suggestions: list[str] = []
     with conn.cursor(dictionary=True) as cursor:
 

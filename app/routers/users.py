@@ -7,12 +7,15 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from mysql.connector import MySQLConnection
+from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.common_models import ResponseModel
 from app.models.user_models import (
+    Condition,
     PasswordResetConfirm,
     PasswordResetRequest,
     RegisterRequest,
+    Role,
 )
 from app.utils.db import get_db_connection
 from app.utils.email_utils import send_reset_email
@@ -21,6 +24,104 @@ SECRET_KEY = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = os.environ["JWT_ALGORITHM"]
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def register_clinician(
+    cursor: MySQLCursorDict, register_request: RegisterRequest
+) -> int:
+    # Hash password
+    hashed_pw = bcrypt.hashpw(
+        register_request.password.encode(), bcrypt.gensalt()
+    ).decode()
+
+    # Insert user into database
+    operation = """
+        INSERT INTO users (username, email, password_hash)
+        VALUES (%s, %s, %s)
+    """
+    params = (
+        register_request.username,
+        register_request.email,
+        hashed_pw,
+    )
+    cursor.execute(operation, params)
+    return cursor.lastrowid
+
+
+def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest):
+    # Hash password
+    hashed_pw = bcrypt.hashpw(
+        register_request.password.encode(), bcrypt.gensalt()
+    ).decode()
+
+    # RULE (subject to change): force the link with a doctor if their email is pending
+    operation = """
+        SELECT id
+        FROM breast_cancer_patients
+        WHERE pending_email = %s
+    """
+    params = (register_request.email,)
+    cursor.execute()
+    bc_row = cursor.fetchone()
+
+    operation = """
+        SELECT id 
+        FROM pediatric_appendicitis_patients
+        WHERE pending_email = %s
+    """
+    params = (register_request.email,)
+    cursor.execute()
+    pa_row = cursor.fetchone()
+
+    patient_id = None
+    new_condition = register_request.condition
+    if not bc_row and not pa_row:
+        pass
+        # Register them as independent of a doctor and with the requested discipline
+    elif bc_row and register_request.condition == Condition.BREAST_CANCER:
+        # Register them as breast cancer linked
+        patient_id = bc_row["id"]
+
+    elif pa_row and register_request.condition == Condition.PEDIATRIC_APPENDICITIS:
+        # Register them as pediatric appendicitis linked
+        patient_id = pa_row["id"]
+    # Register them as the condition where their email is pending and linked to that patient record, ignore requested discipline
+    else:
+        if bc_row:
+            patient_id = bc_row["id"]
+            new_condition = Condition.BREAST_CANCER
+        else:
+            patient_id = pa_row["id"]
+            new_condition = Condition.PEDIATRIC_APPENDICITIS
+
+    # Insert user into database
+    operation = """
+        INSERT INTO users (username, email, password_hash)
+        VALUES (%s, %s, %s)
+    """
+    params = (
+        register_request.username,
+        register_request.email,
+        hashed_pw,
+    )
+    cursor.execute(operation, params)
+    new_user_id = cursor.lastrowid
+
+    if patient_id:
+        if new_condition == Condition.BREAST_CANCER:
+            table = "breast_cancer_patients"
+        else:
+            table = "pediatric_appendicitis_patients"
+
+        operation = f"""
+            UPDATE {table}
+            SET pending_email = %s, user_id = %s
+            WHERE id = %s
+        """
+        params = (register_request.email, new_user_id, patient_id)
+        cursor.execute(operation, params)
+
+    return new_user_id
 
 
 @router.post(
@@ -37,7 +138,10 @@ router = APIRouter(prefix="/users", tags=["Users"])
         },
     },
 )
-def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_connection)):
+def register(
+    register_request: RegisterRequest,
+    conn: MySQLConnection = Depends(get_db_connection),
+):
     try:
         with conn.cursor(dictionary=True) as cursor:
 
@@ -47,7 +151,7 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
                 FROM users
                 WHERE username = %s
             """
-            params = (user.username,)
+            params = (register_request.username,)
             cursor.execute(operation, params)
             if cursor.fetchone():
                 raise HTTPException(
@@ -60,27 +164,18 @@ def register(user: RegisterRequest, conn: MySQLConnection = Depends(get_db_conne
                 FROM users
                 WHERE email = %s
             """
-            params = (user.email,)
+            params = (register_request.email,)
             cursor.execute(operation, params)
             if cursor.fetchone():
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT, detail="Email is taken"
                 )
 
-            # Hash password
-            hashed_pw = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt()).decode()
+            if register_request.role == Role.CLINICIAN:
+                register_clinician(cursor, register_request)
 
-            # Insert user into database
-            operation = """
-                INSERT INTO users (username, email, password_hash)
-                VALUES (%s, %s, %s)
-            """
-            params = (
-                user.username,
-                user.email,
-                hashed_pw,
-            )
-            cursor.execute(operation, params)
+            else:
+                register_patient(cursor, register_request)
 
         conn.commit()
 

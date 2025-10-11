@@ -12,14 +12,15 @@ from app.models.auth_models import (
     TokenType,
 )
 from app.models.common_models import ResponseModel
-from app.models.user_models import User
+from app.models.user_models import Condition, User
 from app.utils.db import get_db_connection, get_user_by_id, user_exists
 from app.utils.jwt import (
     clear_refresh_cookie,
+    clinicians_or_patients_with,
     create_jwt,
     decode_and_validate_jwt,
-    get_and_validate_current_user_id,
     get_refresh_token_from_cookie,
+    require_access,
     set_refresh_cookie,
 )
 
@@ -173,7 +174,13 @@ def logout(response: Response):
 )
 def me(
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: User = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(
+        require_access(
+            clinicians_or_patients_with(
+                {Condition.BREAST_CANCER, Condition.PEDIATRIC_APPENDICITIS}
+            )
+        )
+    ),
 ):
 
     with conn.cursor(dictionary=True) as cursor:

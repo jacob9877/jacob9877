@@ -20,6 +20,7 @@ from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import (
     FEATURE_NAMES,
+    AddBreastCancerPatientRequest,
     AddBreastCancerPatientsRequest,
     BreastCancerPatient,
     BreastCancerPatientFeatures,
@@ -27,10 +28,15 @@ from app.models.breast_cancer_patient_models import (
     UpdateBreastCancerPatientRequest,
 )
 from app.models.common_models import ResponseModel
+from app.models.user_models import Condition, Role
 from app.utils.aws import bulk_send_message_to_sqs, get_predictions
-from app.utils.db import get_breast_cancer_patient_by_id, get_db_connection
+from app.utils.db import (
+    get_breast_cancer_patient_by_id,
+    get_db_connection,
+    insert_pending_email,
+)
 from app.utils.file_parser import parse_csv
-from app.utils.jwt import get_and_validate_current_user_id
+from app.utils.jwt import clinicians_only, require_access
 from app.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(
@@ -52,18 +58,18 @@ EXPLANATION_QUEUE_URL = os.environ["BREAST_CANCER_EXPLANATION_QUEUE_URL"]
 # We went with a inserting a single patient at a time because cursor.execute() returns the newly created ID whereas cursor.executemany() does not
 def _insert_patient(
     cursor: MySQLCursorDict,
-    user_id: int,
+    clinician_user_id: int,
     patient: BreastCancerPatientFeatures,
     diagnosis: Literal[0, 1],
 ) -> int:
-    column_names = ["user_id", *FEATURE_NAMES, "diagnosis"]
+    column_names = ["clinician_user_id", *FEATURE_NAMES, "diagnosis"]
     placeholders = ", ".join(["%s"] * len(column_names))
     operation = f"""
         INSERT INTO breast_cancer_patients ({", ".join(column_names)})
         VALUES ({placeholders})
     """
     params = tuple(
-        [user_id]
+        [clinician_user_id]
         + [getattr(patient, feature_name) for feature_name in FEATURE_NAMES]
         + [diagnosis]
     )
@@ -73,12 +79,11 @@ def _insert_patient(
 
 def _add_patients(
     cursor: MySQLCursorDict,
-    user_id: int,
+    clinician_user_id: int,
     add_patients_request: AddBreastCancerPatientsRequest,
 ) -> list[int]:
     instances = [
-        list(patient.model_dump(exclude={"user_id"}).values())
-        for patient in add_patients_request.patients
+        list(patient.model_dump().values()) for patient in add_patients_request.patients
     ]
     result = get_predictions({"instances": instances}, SAGEMAKER_ENDPOINT_NAME)
     diagnoses = [
@@ -91,10 +96,79 @@ def _add_patients(
 
     inserted_ids = []
     for patient, diagnosis in zip(add_patients_request.patients, diagnoses):
-        pid = _insert_patient(cursor, user_id, patient, diagnosis)
+        pid = _insert_patient(cursor, clinician_user_id, patient, diagnosis)
         inserted_ids.append(pid)
 
     return inserted_ids
+
+
+@router.post(
+    "/single",
+    summary="Add breast cancer patient",
+    description="Add a breast cancer patient with the patient's email.",
+    response_model=ResponseModel[BreastCancerPatient],
+    response_description="Returns the newly created breast cancer patient",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "Email is invalid",
+        }
+    },
+)
+def add_patient(
+    add_patient_request: AddBreastCancerPatientRequest,
+    conn: MySQLConnection = Depends(get_db_connection),
+    current_user_id: int = Depends(require_access(clinicians_only())),
+):
+    try:
+        with conn.cursor(dictionary=True) as cursor:
+
+            add_patients_request = AddBreastCancerPatientsRequest(
+                patients=add_patient_request.model_dump(exclude={"email"})
+            )
+
+            inserted_id = _add_patients(cursor, current_user_id, add_patients_request)[
+                0
+            ]
+
+            # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
+            operation = """
+                SELECT * 
+                FROM breast_cancer_patients
+                WHERE id = %s
+            """
+            params = (inserted_id,)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+
+            if add_patient_request.email:
+                insert_pending_email(
+                    cursor,
+                    add_patient_request.email,
+                    inserted_id,
+                    "breast_cancer_patients",
+                )
+
+        inserted_patient = BreastCancerPatient(**row)
+
+        # Send the new patient info to SQS for explanation processing
+        messages = [
+            inserted_patient.model_dump(include=set(FEATURE_NAMES))
+            | {"patient_id": inserted_patient.id}
+        ]
+        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+
+        conn.commit()
+
+        return ResponseModel[BreastCancerPatient](
+            data=inserted_patient, detail="Patients added successfully"
+        )
+
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise e
 
 
 @router.post(
@@ -104,17 +178,11 @@ def _add_patients(
     response_model=ResponseModel[list[BreastCancerPatient]],
     response_description="Returns the newly created breast cancer patients",
     status_code=status.HTTP_201_CREATED,
-    responses={
-        status.HTTP_400_BAD_REQUEST: {
-            "model": ResponseModel[None],
-            "description": "CSV is invalid",
-        }
-    },
 )
 def add_patients_json(
     add_patients_request: AddBreastCancerPatientsRequest,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -169,7 +237,7 @@ def add_patients_json(
 def add_patients_csv(
     file: UploadFile | None = File(None),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
 
@@ -235,7 +303,7 @@ def add_patients_csv(
 def get_patient(
     patient_id: int = Path(..., description="ID of the patient to get"),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -248,7 +316,7 @@ def get_patient(
                 detail=f"Breast cancer patient with ID {patient_id} not found",
             )
 
-        if patient.user_id != current_user_id:
+        if patient.clinician_user_id != current_user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Not authorized to access this patient",
@@ -294,7 +362,7 @@ def get_breast_cancer_patients_paginated(
         description="Max number of patients to return (1–100)",
     ),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         # Order is (updated_at DESC, id DESC).
@@ -303,7 +371,7 @@ def get_breast_cancer_patients_paginated(
         operation = """
             SELECT *
             FROM breast_cancer_patients
-            WHERE user_id = %s
+            WHERE clinician_user_id = %s
         """
 
         params = [current_user_id]
@@ -454,7 +522,7 @@ def _update_and_repredict(
 def repredict_patient(
     patient_id: int = Path(..., description="ID of the patient to re-predict"),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -467,7 +535,7 @@ def repredict_patient(
                     detail=f"Breast cancer patient with ID {patient_id} not found",
                 )
 
-            if patient.user_id != current_user_id:
+            if patient.clinician_user_id != current_user_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Not authorized to modify this patient",
@@ -521,7 +589,7 @@ def update_patient(
         ..., description="Fields to update (at least one)"
     ),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -534,7 +602,7 @@ def update_patient(
                     detail=f"Breast cancer patient with ID {patient_id} not found",
                 )
 
-            if patient.user_id != current_user_id:
+            if patient.clinician_user_id != current_user_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Not authorized to modify this patient",
@@ -545,6 +613,11 @@ def update_patient(
                 patient_id=patient_id,
                 partial_update=new_patient_data,
             )
+
+            if new_patient_data.email:
+                insert_pending_email(
+                    cursor, new_patient_data.email, patient_id, "breast_cancer_patients"
+                )
 
         conn.commit()
 
@@ -591,7 +664,7 @@ def delete_patients(
         example="ids=1&ids=2&ids=3",
     ),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -599,7 +672,7 @@ def delete_patients(
             # Verify all IDs exist
             placeholders = ",".join(["%s"] * len(patient_ids))
             operation = f"""
-                SELECT id, user_id
+                SELECT id, clinician_user_id
                 FROM breast_cancer_patients
                 WHERE id IN ({placeholders})
             """
@@ -617,7 +690,7 @@ def delete_patients(
                 )
 
             forbidden_ids = [
-                row["id"] for row in rows if row["user_id"] != current_user_id
+                row["id"] for row in rows if row["clinician_user_id"] != current_user_id
             ]
             if forbidden_ids:
                 raise HTTPException(

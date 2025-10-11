@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.common_models import PaginatedResults
 
@@ -134,7 +134,9 @@ class PediatricAppendicitisPatient(
     PediatricAppendicitisPatientFeatures, PediatricAppendicitisPredictions
 ):
     id: int
-    user_id: int
+    clinician_user_id: int
+    user_id: int | None = None
+    pending_email: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -153,6 +155,7 @@ class PediatricAppendicitisPatientWithImages(PediatricAppendicitisPatient):
 class UpsertPediatricAppendicitisPatientRequest(BaseModel):
     features: PediatricAppendicitisPatientFeatures
     image_upload_ids: list[str] | None = []
+    email: EmailStr
 
 
 class S3Uri(BaseModel):
@@ -162,4 +165,3 @@ class S3Uri(BaseModel):
 
 class PaginatedPediatricAppendicitisPatients(PaginatedResults):
     patients: list[PediatricAppendicitisPatient]
-

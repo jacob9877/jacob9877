@@ -2,6 +2,8 @@ from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.models.user_models import RoleAndCondition
+
 
 class TokenType(str, Enum):
     ACCESS = "access"
@@ -30,6 +32,6 @@ class RefreshResponse(BaseModel):
     access_token: str
 
 
-class MeResponse(BaseModel):
+class MeResponse(RoleAndCondition):
     username: str
     email: str

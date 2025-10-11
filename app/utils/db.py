@@ -1,17 +1,17 @@
 import os
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any, Generator, Literal
 
 import mysql.connector
 from dotenv import find_dotenv, load_dotenv
+from fastapi import HTTPException, status
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
 from app.models.conversation_models import Conversation
-from app.models.mortality_patient_models import MortalityPatient
 from app.models.pediatric_appendicitis_models import PediatricAppendicitisPatient
-from app.models.user_models import User
+from app.models.user_models import Condition, User
 
 load_dotenv(find_dotenv())
 
@@ -109,22 +109,6 @@ def get_breast_cancer_patient_by_id(
     return BreastCancerPatient(**row)
 
 
-def get_mortality_patient_by_id(
-    cursor: MySQLCursorDict, patient_id: int
-) -> MortalityPatient | None:
-    operation = """
-        SELECT *
-        FROM mortality_patients
-        WHERE id = %s
-    """
-    params = (patient_id,)
-    cursor.execute(operation, params)
-    row = cursor.fetchone()
-    if row is None:
-        return None
-    return MortalityPatient(**row)
-
-
 def get_pediatric_appendicitis_patient_by_id(
     cursor: MySQLCursorDict, patient_id: int
 ) -> PediatricAppendicitisPatient | None:
@@ -139,3 +123,124 @@ def get_pediatric_appendicitis_patient_by_id(
     if row is None:
         return None
     return PediatricAppendicitisPatient(**row)
+
+
+def insert_pending_email(
+    cursor: MySQLCursorDict,
+    email: str,
+    target_patient_id: int,
+    target_patient_table: Literal[
+        "breast_cancer_patients", "pediatric_appendicitis_patients"
+    ],
+):
+
+    # Cases:
+    # The email is pending in a patients table -> invalid
+    # There is a user account of a different discipline with that email -> invalid
+    # There is a user of the correct discipline with that email but they are already linked to a doctor -> invalid
+    # There is a user of the correct discipline with that email and they are not linked to a doctor -> valid
+    # The email is not pending and there is no user account associated with it -> valid
+
+    operation = """
+        SELECT id
+        FROM breast_cancer_patients
+        WHERE pending_email = %s
+    """
+    params = (email,)
+    cursor.execute(operation, params)
+    bc_row = cursor.fetchone()
+
+    operation = """
+        SELECT id
+        FROM pediatric_appendicitis_patients
+        WHERE pending_email = %s
+    """
+    params = (email,)
+    cursor.execute(operation, params)
+    pa_row = cursor.fetchone()
+
+    if bc_row or pa_row:
+        # This is a re-insert of the patient email: don't throw an error
+        if (
+            target_patient_table == "breast_cancer_patients"
+            and bc_row["id"] == target_patient_id
+        ):
+            pass
+        elif (
+            target_patient_table == "pediatric_appendicitis_patients"
+            and pa_row["id"] == target_patient_id
+        ):
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already pending in another patient",
+        )
+
+    operation = """
+        SELECT id, condition
+        FROM users
+        WHERE email = %s
+    """
+    params = (email,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    # If a user already exists with this email
+    if row is not None:
+        # There is a user account of a different discipline with that email
+        if (
+            target_patient_table == "breast_cancer_patients"
+            and row["condition"] != Condition.BREAST_CANCER
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already taken by a user with a different condition",
+            )
+        elif (
+            target_patient_table == "pediatric_appendicitis_patients"
+            and row["condition"] != Condition.PEDIATRIC_APPENDICITIS
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email is already taken by a user with a different condition",
+            )
+
+        # Otherwise, the existing user account has the same discipline.
+        # Are they already linked to a patient record?
+        if row["condition"] == Condition.BREAST_CANCER:
+            operation == """
+                SELECT id
+                FROM breast_cancer_patients
+                WHERE user_id = %s
+            """
+            params = (row["user_id"],)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+            if row is not None and row["id"] != target_patient_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="User already exists with this email and is already linked to a different patient record",
+                )
+
+        elif row["condition"] == Condition.PEDIATRIC_APPENDICITIS:
+            operation == """
+                SELECT id
+                FROM pediatric_appendicitis_patients
+                WHERE user_id = %s
+            """
+            params = (row["user_id"],)
+            cursor.execute(operation, params)
+            row = cursor.fetchone()
+            if row is not None and row["id"] != target_patient_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="User already exists with this email and is already linked to a different patient record",
+                )
+
+    # Now we should be good to go
+    operation = f"""
+        UPDATE {target_patient_table}
+        SET pending_email = %s
+        WHERE id = %s
+    """
+    params = (email, target_patient_id)
+    cursor.execute(operation, params)

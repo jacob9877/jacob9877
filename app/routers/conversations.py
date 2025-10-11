@@ -20,7 +20,7 @@ from app.utils.db import (
     get_db_connection,
     get_pediatric_appendicitis_patient_by_id,
 )
-from app.utils.jwt import get_and_validate_current_user_id
+from app.utils.jwt import all_registered_users, require_access
 
 router = APIRouter(
     prefix="/conversations",
@@ -55,7 +55,7 @@ router = APIRouter(
 def start_conversation(
     request: StartConversationRequest,
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(all_registered_users())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -150,7 +150,7 @@ def get_conversation(
         description="ID of the conversation to return", example=1
     ),
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(all_registered_users())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
@@ -194,7 +194,7 @@ def get_user_conversations(
     assistant: AssistantSlug | None = Query(
         default=None, description="Type of assistant to filter conversations by"
     ),
-    current_user_id: int = Depends(get_and_validate_current_user_id),
+    current_user_id: int = Depends(require_access(all_registered_users())),
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
