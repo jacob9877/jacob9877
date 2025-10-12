@@ -40,7 +40,7 @@ def _insert_message(
 @router.post(
     "",
     summary="Send a message to get a reply",
-    description="Take in a message from the user, and given this message plus the previous conversation history, send a reply back to the user using Gemini. May also include a new conversation title if this is the first user message of the conversation",
+    description="Take in a message from the user, and given this message plus the previous conversation history, send a reply back to the user using LLM. May also include a new conversation title if this is the first user message of the conversation",
     response_model=ResponseModel[ChatResponse],
     response_description='Returns the assistant reply and potentially a new conversation title (will be "" if not created)',
     status_code=status.HTTP_200_OK,

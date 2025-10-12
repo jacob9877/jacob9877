@@ -16,8 +16,8 @@ class Condition(Enum):
 
 
 class RoleAndCondition(BaseModel):
-    role: Role
-    condition: Condition | None = None
+    role: Role = Field(example="patient")
+    condition: Condition | None = Field(default=None, example="breast-cancer")
 
     @model_validator(mode="after")
     def validate_role_condition(self) -> Self:
