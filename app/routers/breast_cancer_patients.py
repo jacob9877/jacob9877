@@ -400,6 +400,18 @@ def get_breast_cancer_patients_paginated(
             cursor.execute(operation, tuple(params))
             rows = cursor.fetchall()
 
+            # Get the total count while we have the cursor
+            operation = """
+                SELECT COUNT(*) 
+                AS count
+                FROM breast_cancer_patients
+                WHERE clinician_user_id = %s
+            """
+            params = (current_user_id,)
+            cursor.execute()
+            result = cursor.fetchone()
+            total_count = result["count"]
+
         # Build response items and next cursor (if we fetched limit+1)
         has_more = len(rows) > limit
         if has_more:
@@ -416,6 +428,7 @@ def get_breast_cancer_patients_paginated(
 
         paginated_patients = PaginatedBreastCancerPatients(
             next_cursor=next_cursor,
+            total_count=total_count,
             patients=patients,
         )
         return ResponseModel[PaginatedBreastCancerPatients](
