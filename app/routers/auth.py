@@ -12,7 +12,7 @@ from app.models.auth_models import (
     TokenType,
 )
 from app.models.common_models import ResponseModel
-from app.models.user_models import Condition, User
+from app.models.user_models import Condition
 from app.utils.db import get_db_connection, get_user_by_id, user_exists
 from app.utils.jwt import (
     clear_refresh_cookie,

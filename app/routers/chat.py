@@ -7,8 +7,9 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import AssistantSlug
+from app.utils.assistants.access import has_access_to_assistant
 from app.utils.assistants.mapping import assistant_mapping
-from app.utils.db import get_conversation_by_id, get_db_connection
+from app.utils.db import get_conversation_by_id, get_db_connection, get_user_by_id
 from app.utils.jwt import all_registered_users, require_access
 
 router = APIRouter(
@@ -54,7 +55,7 @@ def _insert_message(
         },
     },
 )
-def chat_agent(
+def chat(
     request: ChatRequest,
     conn: MySQLConnection = Depends(get_db_connection),
     current_user_id: int = Depends(require_access(all_registered_users())),
@@ -115,10 +116,17 @@ def get_chat_suggestions(
     current_user_id: int = Depends(require_access(all_registered_users())),
 ):
 
-    # Now we need to determine if the user has access to the assistant
-    suggestions: list[str] = []
     with conn.cursor(dictionary=True) as cursor:
 
+        # Verify access to the requested assistant
+        user = get_user_by_id(cursor, current_user_id)
+        if not has_access_to_assistant(user.role, user.condition, assistant):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to chat with the requested assistant",
+            )
+
+        suggestions: list[str] = []
         if assistant == "clinician-breast-cancer":
             operation = """
                 SELECT p.id
@@ -137,7 +145,11 @@ def get_chat_suggestions(
                 suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
                 suggestions.append(suggestion)
 
-        else:
+            suggestions.append(
+                "What are some recruiting breast cancer clinical trials?"
+            )
+
+        elif assistant == "clinician-pediatric-appendicitis":
             operation = """
                 SELECT p.id, p.diagnosis, p.management
                 FROM pediatric_appendicitis_patients AS p
@@ -161,6 +173,18 @@ def get_chat_suggestions(
                 else:
                     suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
                 suggestions.append(suggestion)
+
+            suggestions.append(
+                "Are there any recruiting clinical trials for pediatric appendicitis?"
+            )
+
+        elif assistant == "patient-breast-cancer":
+            suggestions.append("What are some common breast cancer recovery struggles?")
+
+        elif assistant == "patient-pediatric-appendicitis":
+            suggestions.append(
+                "What are some common recovery struggles with appendicitis in kids?"
+            )
 
     return ResponseModel[list[str]](
         detail="No suggestions available" if len(suggestions) == 0 else "",

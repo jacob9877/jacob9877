@@ -13,12 +13,14 @@ from app.models.conversation_models import (
     StartConversationRequest,
     StartConversationResponse,
 )
+from app.utils.assistants.access import has_access_to_assistant
 from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
     get_conversation_by_id,
     get_db_connection,
     get_pediatric_appendicitis_patient_by_id,
+    get_user_by_id,
 )
 from app.utils.jwt import all_registered_users, require_access
 
@@ -59,6 +61,17 @@ def start_conversation(
 ):
     try:
         with conn.cursor(dictionary=True) as cursor:
+
+            # Verify access to the requested assistant
+            user = get_user_by_id(cursor, current_user_id)
+            if not has_access_to_assistant(
+                user.role, user.condition, request.assistant
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to chat with the requested assistant",
+                )
+
             # If patient_id is provided, ensure the user has access to this patient
             if request.patient_id is not None:
                 if request.assistant == "clinician-breast-cancer":

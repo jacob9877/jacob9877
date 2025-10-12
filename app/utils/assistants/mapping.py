@@ -1,9 +1,9 @@
 from app.models.conversation_models import AssistantSlug
 from app.utils.assistants.base_assistant import Assistant
-from app.utils.assistants.clinician_breast_cancer_assistant import (
+from app.utils.assistants.clinician_breast_cancer_assistant.assistant import (
     ClinicianBreastCancerAssistant,
 )
-from app.utils.assistants.clinician_pediatric_appendicitis_assistant import (
+from app.utils.assistants.clinician_pediatric_appendicitis_assistant.assistant import (
     ClinicianPediatricAppendicitisAssistant,
 )
 

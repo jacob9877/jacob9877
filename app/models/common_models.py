@@ -12,3 +12,4 @@ class ResponseModel(BaseModel, Generic[T]):
 
 class PaginatedResults(BaseModel):
     next_cursor: str | None = Field(default=None, description="...")
+    total_count: int

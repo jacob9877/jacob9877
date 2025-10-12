@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from app.models.conversation_models import AssistantSlug, Conversation
+from app.models.conversation_models import AssistantSlug
 
 
 class Assistant(ABC):
@@ -11,7 +11,7 @@ class Assistant(ABC):
         pass
 
     @abstractmethod
-    def invoke(self, conversation: Conversation, user_message: str) -> str:
+    def invoke(self, user_message: str) -> str:
         pass
 
     @staticmethod
