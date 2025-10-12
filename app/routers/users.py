@@ -61,7 +61,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
         WHERE pending_email = %s
     """
     params = (register_request.email,)
-    cursor.execute()
+    cursor.execute(operation, params)
     bc_row = cursor.fetchone()
 
     operation = """
@@ -70,7 +70,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
         WHERE pending_email = %s
     """
     params = (register_request.email,)
-    cursor.execute()
+    cursor.execute(operation, params)
     pa_row = cursor.fetchone()
 
     patient_id = None

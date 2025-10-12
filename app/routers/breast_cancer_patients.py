@@ -408,7 +408,7 @@ def get_breast_cancer_patients_paginated(
                 WHERE clinician_user_id = %s
             """
             params = (current_user_id,)
-            cursor.execute()
+            cursor.execute(operation, params)
             result = cursor.fetchone()
             total_count = result["count"]
 
