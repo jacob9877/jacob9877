@@ -26,11 +26,11 @@ jobs:
       - name: Build, tag, and push Docker image to ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPO: ${{ secrets.ECR_REPOSITORY_NAME }}
+          ECR_REPO_NAME: ${{ secrets.ECR_REPOSITORY_NAME }}
         run: |
           set -euo pipefail
-          IMAGE_SHA_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
-          IMAGE_LATEST_URI="$ECR_REGISTRY/$REPO:latest"
+          IMAGE_SHA_URI="$ECR_REGISTRY/$ECR_REPO_NAME:${{ github.sha }}"
+          IMAGE_LATEST_URI="$ECR_REGISTRY/$ECR_REPO_NAME:latest"
 
           docker build --platform linux/amd64 -t "$IMAGE_SHA_URI" -t "$IMAGE_LATEST_URI" .
           docker push "$IMAGE_SHA_URI"
@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          IMAGE_URI="$ECR_REGISTRY/$REPO:${{ github.sha }}"
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPO_NAME:${{ github.sha }}"
 
           echo "0) Pre-clean: delete alias-level provisioned concurrency config for '$ALIAS_NAME' (if any)..."
           aws lambda delete-provisioned-concurrency-config \
