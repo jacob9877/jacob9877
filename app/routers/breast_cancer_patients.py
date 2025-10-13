@@ -125,7 +125,7 @@ def add_patient(
         with conn.cursor(dictionary=True) as cursor:
 
             add_patients_request = AddBreastCancerPatientsRequest(
-                patients=add_patient_request.model_dump(exclude={"email"})
+                patients=[add_patient_request.model_dump(exclude={"email"})]
             )
 
             inserted_id = _add_patients(cursor, current_user_id, add_patients_request)[

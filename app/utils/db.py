@@ -135,11 +135,11 @@ def insert_pending_email(
 ):
 
     # First check if we can do the linking right away
-    # If the patient is of the right discipline and not associated with a doctor
+    # If a patient user exists with this email, the patient is of the right discipline, and not associated with a doctor
     if target_patient_table == "breast_cancer_patients":
-        condition = Condition.BREAST_CANCER
+        condition = Condition.BREAST_CANCER.value
     else:
-        condition = Condition.PEDIATRIC_APPENDICITIS
+        condition = Condition.PEDIATRIC_APPENDICITIS.value
 
     operation = f"""
         SELECT u.id
@@ -154,7 +154,7 @@ def insert_pending_email(
     params = (condition, email)
     cursor.execute(operation, params)
     row = cursor.fetchone()
-    if row is None:
+    if row is not None:
         # Link here
         operation = f"""
             UPDATE {target_patient_table}
@@ -208,7 +208,7 @@ def insert_pending_email(
         )
 
     operation = """
-        SELECT id, condition
+        SELECT id, `condition`
         FROM users
         WHERE email = %s
     """
@@ -220,7 +220,7 @@ def insert_pending_email(
         # There is a user account of a different discipline with that email
         if (
             target_patient_table == "breast_cancer_patients"
-            and row["condition"] != Condition.BREAST_CANCER
+            and row["condition"] != Condition.BREAST_CANCER.value
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -228,7 +228,7 @@ def insert_pending_email(
             )
         elif (
             target_patient_table == "pediatric_appendicitis_patients"
-            and row["condition"] != Condition.PEDIATRIC_APPENDICITIS
+            and row["condition"] != Condition.PEDIATRIC_APPENDICITIS.value
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -237,7 +237,7 @@ def insert_pending_email(
 
         # Otherwise, the existing user account has the same discipline.
         # Are they already linked to a patient record?
-        if row["condition"] == Condition.BREAST_CANCER:
+        if row["condition"] == Condition.BREAST_CANCER.value:
             operation == """
                 SELECT id
                 FROM breast_cancer_patients
@@ -252,7 +252,7 @@ def insert_pending_email(
                     detail="User already exists with this email and is already linked to a different patient record",
                 )
 
-        elif row["condition"] == Condition.PEDIATRIC_APPENDICITIS:
+        elif row["condition"] == Condition.PEDIATRIC_APPENDICITIS.value:
             operation == """
                 SELECT id
                 FROM pediatric_appendicitis_patients
@@ -274,4 +274,7 @@ def insert_pending_email(
         WHERE id = %s
     """
     params = (email, target_patient_id)
+    cursor.execute(operation, params)
+    cursor.execute(operation, params)
+    cursor.execute(operation, params)
     cursor.execute(operation, params)

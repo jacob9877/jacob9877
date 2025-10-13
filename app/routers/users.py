@@ -36,13 +36,15 @@ def register_clinician(
 
     # Insert user into database
     operation = """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (%s, %s, %s)
+        INSERT INTO users (username, email, password_hash, role, `condition`)
+        VALUES (%s, %s, %s, %s, %s)
     """
     params = (
         register_request.username,
         register_request.email,
         hashed_pw,
+        Role.CLINICIAN.value,
+        None,
     )
     cursor.execute(operation, params)
     return cursor.lastrowid
@@ -78,37 +80,41 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
     if not bc_row and not pa_row:
         pass
         # Register them as independent of a doctor and with the requested discipline
-    elif bc_row and register_request.condition == Condition.BREAST_CANCER:
+    elif bc_row and register_request.condition == Condition.BREAST_CANCER.value:
         # Register them as breast cancer linked
         patient_id = bc_row["id"]
 
-    elif pa_row and register_request.condition == Condition.PEDIATRIC_APPENDICITIS:
+    elif (
+        pa_row and register_request.condition == Condition.PEDIATRIC_APPENDICITIS.value
+    ):
         # Register them as pediatric appendicitis linked
         patient_id = pa_row["id"]
     # Register them as the condition where their email is pending and linked to that patient record, ignore requested discipline
     else:
         if bc_row:
             patient_id = bc_row["id"]
-            new_condition = Condition.BREAST_CANCER
+            new_condition = Condition.BREAST_CANCER.value
         else:
             patient_id = pa_row["id"]
-            new_condition = Condition.PEDIATRIC_APPENDICITIS
+            new_condition = Condition.PEDIATRIC_APPENDICITIS.value
 
     # Insert user into database
     operation = """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (%s, %s, %s)
+        INSERT INTO users (username, email, password_hash, role, `condition`)
+        VALUES (%s, %s, %s, %s, %s)
     """
     params = (
         register_request.username,
         register_request.email,
         hashed_pw,
+        Role.PATIENT.value,
+        new_condition,
     )
     cursor.execute(operation, params)
     new_user_id = cursor.lastrowid
 
     if patient_id:
-        if new_condition == Condition.BREAST_CANCER:
+        if new_condition == Condition.BREAST_CANCER.value:
             table = "breast_cancer_patients"
         else:
             table = "pediatric_appendicitis_patients"
@@ -118,7 +124,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
             SET pending_email = %s, user_id = %s
             WHERE id = %s
         """
-        params = (register_request.email, new_user_id, patient_id)
+        params = (None, new_user_id, patient_id)
         cursor.execute(operation, params)
 
     return new_user_id

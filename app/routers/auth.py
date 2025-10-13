@@ -15,8 +15,8 @@ from app.models.common_models import ResponseModel
 from app.models.user_models import Condition
 from app.utils.db import get_db_connection, get_user_by_id, user_exists
 from app.utils.jwt import (
+    all_registered_users,
     clear_refresh_cookie,
-    clinicians_or_patients_with,
     create_jwt,
     decode_and_validate_jwt,
     get_refresh_token_from_cookie,
@@ -174,13 +174,7 @@ def logout(response: Response):
 )
 def me(
     conn: MySQLConnection = Depends(get_db_connection),
-    current_user_id: int = Depends(
-        require_access(
-            clinicians_or_patients_with(
-                {Condition.BREAST_CANCER, Condition.PEDIATRIC_APPENDICITIS}
-            )
-        )
-    ),
+    current_user_id: int = Depends(require_access(all_registered_users())),
 ):
 
     with conn.cursor(dictionary=True) as cursor:
