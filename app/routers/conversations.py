@@ -88,7 +88,10 @@ def start_conversation(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail=f"Patient with ID {request.patient_id} not found",
                     )
-                if patient.user_id != current_user_id:
+
+                print(patient)
+
+                if patient.clinician_user_id != current_user_id:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=f"Not authorized to chat about patient with ID {request.patient_id}",

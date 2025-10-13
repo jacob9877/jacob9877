@@ -133,7 +133,7 @@ def get_chat_suggestions(
                 FROM breast_cancer_patients AS p
                 JOIN breast_cancer_explanations AS e
                 ON e.patient_id = p.id
-                WHERE p.user_id = %s
+                WHERE p.clinician_user_id = %s
                 ORDER BY p.updated_at DESC
                 LIMIT 1;
             """
@@ -155,7 +155,7 @@ def get_chat_suggestions(
                 FROM pediatric_appendicitis_patients AS p
                 JOIN pediatric_appendicitis_explanations AS e
                 ON e.patient_id = p.id
-                WHERE p.user_id = %s
+                WHERE p.clinician_user_id = %s
                 ORDER BY p.updated_at DESC
                 LIMIT 1;
             """

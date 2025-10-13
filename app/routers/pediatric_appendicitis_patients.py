@@ -141,12 +141,12 @@ def _get_s3_uri_for_upload_id(
 
 def _insert_patient(
     cursor: MySQLCursorDict,
-    user_id: int,
+    clinician_user_id: int,
     features: PediatricAppendicitisPatientFeatures,
     predictions: PediatricAppendicitisPredictions,
 ) -> PediatricAppendicitisPatient:
     column_names = [
-        "user_id",
+        "clinician_user_id",
         *FEATURE_NAMES,
         *list(PediatricAppendicitisPredictions.model_fields.keys()),
     ]
@@ -156,7 +156,7 @@ def _insert_patient(
         VALUES ({placeholders})
     """
     params = tuple(
-        [user_id]
+        [clinician_user_id]
         + [getattr(features, feature_name) for feature_name in FEATURE_NAMES]
         + list(predictions.model_dump().values())
     )

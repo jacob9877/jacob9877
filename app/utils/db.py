@@ -134,6 +134,37 @@ def insert_pending_email(
     ],
 ):
 
+    # First check if we can do the linking right away
+    # If the patient is of the right discipline and not associated with a doctor
+    if target_patient_table == "breast_cancer_patients":
+        condition = Condition.BREAST_CANCER
+    else:
+        condition = Condition.PEDIATRIC_APPENDICITIS
+
+    operation = f"""
+        SELECT u.id
+        FROM users AS u
+        WHERE u.condition = %s AND u.email = %s
+        AND NOT EXISTS (
+            SELECT 1
+            FROM {target_patient_table} AS p
+            WHERE p.user_id = u.id
+        );
+    """
+    params = (condition, email)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row is None:
+        # Link here
+        operation = f"""
+            UPDATE {target_patient_table}
+            SET user_id = %s, pending_email = NULL
+            WHERE id = %s
+        """
+        params = (row["id"], target_patient_id)
+        cursor.execute(operation, params)
+        return
+
     # Cases:
     # The email is pending in a patients table -> invalid
     # There is a user account of a different discipline with that email -> invalid
