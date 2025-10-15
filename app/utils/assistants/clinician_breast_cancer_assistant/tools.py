@@ -78,7 +78,7 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
 
         operation = """
             SELECT bce.explanation,
-                bcp.user_id
+                bcp.clinician_user_id
             FROM breast_cancer_explanations AS bce
             JOIN breast_cancer_patients AS bcp
             ON bce.patient_id = bcp.id
@@ -94,7 +94,7 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
             detail=f"No explanation for patient with ID {patient_id} found",
         )
 
-    if row["user_id"] != config["configurable"].get("user_id"):
+    if row["clinician_user_id"] != config["configurable"].get("user_id"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not authorized to access this patient's data",

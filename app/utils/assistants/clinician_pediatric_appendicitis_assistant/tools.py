@@ -39,7 +39,7 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
             detail=f"Patient with ID {patient_id} not found",
         )
 
-    if patient.user_id != config["configurable"].get("user_id"):
+    if patient.clinician_user_id != config["configurable"].get("user_id"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not authorized to access this patient's data",
@@ -88,7 +88,7 @@ def explain_diagnosis(
     with get_db_cursor_cm() as cursor:
         operation = f"""
             SELECT pae.{explanation_column},
-                pap.user_id
+                pap.clinician_user_id
             FROM pediatric_appendicitis_explanations AS pae
             JOIN pediatric_appendicitis_patients AS pap
             ON pae.patient_id = pap.id
@@ -104,7 +104,7 @@ def explain_diagnosis(
             detail=f"No explanation for patient with ID {patient_id} found",
         )
 
-    if row["user_id"] != config["configurable"].get("user_id"):
+    if row["clinician_user_id"] != config["configurable"].get("user_id"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not authorized to access this patient's data",
