@@ -40,7 +40,7 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
             detail=f"Patient with ID {patient_id} not found",
         )
 
-    if patient.user_id != config["configurable"].get("user_id"):
+    if patient.clinician_user_id != config["configurable"].get("user_id"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not authorized to access this patient's data",
