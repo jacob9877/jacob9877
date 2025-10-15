@@ -17,7 +17,7 @@ from app.models.user_models import (
     RegisterRequest,
     Role,
 )
-from app.utils.db import get_db_connection
+from app.utils.db import get_db_cursor
 from app.utils.email_utils import send_reset_email
 
 SECRET_KEY = os.environ["JWT_SECRET"]
@@ -146,53 +146,43 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
 )
 def register(
     register_request: RegisterRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
-
-            # Check if user exists with provided username
-            operation = """
-                SELECT id
-                FROM users
-                WHERE username = %s
-            """
-            params = (register_request.username,)
-            cursor.execute(operation, params)
-            if cursor.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT, detail="Username is taken"
-                )
-
-            # Check if user exists with provided email
-            operation = """
-                SELECT id
-                FROM users
-                WHERE email = %s
-            """
-            params = (register_request.email,)
-            cursor.execute(operation, params)
-            if cursor.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT, detail="Email is taken"
-                )
-
-            if register_request.role == Role.CLINICIAN:
-                register_clinician(cursor, register_request)
-
-            else:
-                register_patient(cursor, register_request)
-
-        conn.commit()
-
-        return ResponseModel[None](
-            detail="User registered successfully",
+    # Check if user exists with provided username
+    operation = """
+        SELECT id
+        FROM users
+        WHERE username = %s
+    """
+    params = (register_request.username,)
+    cursor.execute(operation, params)
+    if cursor.fetchone():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Username is taken"
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    # Check if user exists with provided email
+    operation = """
+        SELECT id
+        FROM users
+        WHERE email = %s
+    """
+    params = (register_request.email,)
+    cursor.execute(operation, params)
+    if cursor.fetchone():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Email is taken"
+        )
+
+    if register_request.role == Role.CLINICIAN:
+        register_clinician(cursor, register_request)
+
+    else:
+        register_patient(cursor, register_request)
+
+    return ResponseModel[None](
+        detail="User registered successfully",
+    )
 
 
 @router.post(
@@ -222,32 +212,28 @@ def register(
     },
 )
 async def request_password_reset(
-    data: PasswordResetRequest, conn: MySQLConnection = Depends(get_db_connection)
+    data: PasswordResetRequest, cursor: MySQLCursorDict = Depends(get_db_cursor)
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
-            cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
-            user = cursor.fetchone()
 
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-                )
+    cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
+    user = cursor.fetchone()
 
-        payload = {
-            "sub": str(user["id"]),
-            "purpose": "password_reset",
-            "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
-        }
-        token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
-
-        await send_reset_email(data.email, token)
-        return ResponseModel[None](
-            detail="Password reset email sent",
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+
+    payload = {
+        "sub": str(user["id"]),
+        "purpose": "password_reset",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+    await send_reset_email(data.email, token)
+    return ResponseModel[None](
+        detail="Password reset email sent",
+    )
 
 
 @router.post(
@@ -283,7 +269,7 @@ async def request_password_reset(
     },
 )
 def reset_password(
-    data: PasswordResetConfirm, conn: MySQLConnection = Depends(get_db_connection)
+    data: PasswordResetConfirm, cursor: MySQLCursorDict = Depends(get_db_cursor)
 ):
     try:
         payload = jwt.decode(data.token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
@@ -300,12 +286,10 @@ def reset_password(
 
         hashed_pw = bcrypt.hashpw(data.new_password.encode(), bcrypt.gensalt()).decode()
 
-        with conn.cursor(dictionary=True) as cursor:
-            cursor.execute(
-                "UPDATE users SET password_hash = %s WHERE id = %s",
-                (hashed_pw, user_id),
-            )
-        conn.commit()
+        cursor.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (hashed_pw, user_id),
+        )
 
         return ResponseModel[None](
             detail="Password has been reset successfully",

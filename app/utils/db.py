@@ -1,11 +1,12 @@
 import os
+import traceback
 from contextlib import contextmanager
-from typing import Any, Generator, Literal
+from typing import Any, ContextManager, Generator, Literal
 
 import mysql.connector
 from dotenv import find_dotenv, load_dotenv
 from fastapi import HTTPException, status
-from mysql.connector import MySQLConnection
+from mysql.connector import MySQLConnection, pooling
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
@@ -22,34 +23,83 @@ DB_PASSWORD = os.environ["DB_PASSWORD"]
 DB_PORT = int(os.environ["DB_PORT"])
 DB_NAME = os.environ["DB_NAME"]
 
+POOL_NAME = os.getenv("DB_POOL_NAME", "main_pool")
+POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
+POOL_RESET = os.getenv("DB_POOL_RESET_SESSION", "True").lower() == "true"
+
+# Singleton, process-wide connection pool
+connection_pool = pooling.MySQLConnectionPool(
+    pool_name=POOL_NAME,
+    pool_size=POOL_SIZE,
+    pool_reset_session=POOL_RESET,  # resets session state when the connection is returned
+    host=DB_HOST,
+    user=DB_USER,
+    password=DB_PASSWORD,
+    port=DB_PORT,
+    database=DB_NAME,
+    autocommit=False,  # we control transactions explicitly
+)
+
+
+def get_db_cursor() -> Generator[MySQLCursorDict, None, None]:
+    """
+    FastAPI dependency that yields a dict cursor from a pooled connection.
+    - Commits the transaction if the endpoint completes successfully.
+    - On exception: rolls back, prints traceback, and re-raises.
+    - Always closes cursor and returns the connection to the pool.
+    """
+    conn = None
+    cursor: MySQLCursorDict | None = None
+    try:
+        conn = connection_pool.get_connection()
+
+        conn.autocommit = False
+
+        cursor = conn.cursor(dictionary=True)
+
+        yield cursor
+
+        # Endpoint finished successfully - commit
+        conn.commit()
+
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        traceback.print_exc()
+        raise
+
+    finally:
+        # Clean up in reverse order
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn is not None:
+            try:
+                conn.close()  # returns to pool
+            except Exception:
+                pass
+
 
 @contextmanager
-def db_connection_cm():
-    """
-    Context manager for database connection.
-
-    Usage: `with db_connection_cm() as conn:`
-    """
-    conn = mysql.connector.connect(
-        host=DB_HOST,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        port=DB_PORT,
-        database=DB_NAME,
-    )
+def get_db_cursor_cm() -> Generator[MySQLCursorDict, None, None]:
+    conn = connection_pool.get_connection()
+    conn.autocommit = False
+    cursor = conn.cursor(dictionary=True)
     try:
-        yield conn
+        yield cursor
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        traceback.print_exc()
+        raise
     finally:
+        cursor.close()
         conn.close()
-
-
-def get_db_connection() -> Generator[MySQLConnection, None, None]:
-    """
-    DB connection generator for use with FastAPI dependency injection.
-
-    Usage: `conn = Depends(get_db_connection)`"""
-    with db_connection_cm() as conn:
-        yield conn
 
 
 def get_db_connection_string() -> str:

@@ -9,7 +9,7 @@ from app.models.common_models import ResponseModel
 from app.models.conversation_models import AssistantSlug
 from app.utils.assistants.access import has_access_to_assistant
 from app.utils.assistants.mapping import assistant_mapping
-from app.utils.db import get_conversation_by_id, get_db_connection, get_user_by_id
+from app.utils.db import get_conversation_by_id, get_db_cursor, get_user_by_id
 from app.utils.jwt import all_registered_users, require_access
 
 router = APIRouter(
@@ -57,49 +57,37 @@ def _insert_message(
 )
 def chat(
     request: ChatRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(all_registered_users())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            conversation = get_conversation_by_id(cursor, request.conversation_id)
+    conversation = get_conversation_by_id(cursor, request.conversation_id)
 
-            # User provided a conversation ID but it doesn't exist
-            if request.conversation_id and not conversation:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Conversation with ID {request.conversation_id} not found",
-                )
-            # User provided a conversation ID but the conversation doesn't belong to them
-            elif request.conversation_id and conversation.user_id != current_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Not authorized to access conversation {request.conversation_id}",
-                )
-
-            assistant = assistant_mapping[conversation.assistant](conversation)
-            assistant_reply = assistant.invoke(request.user_message)
-
-            _insert_message(
-                cursor, request.conversation_id, "user", request.user_message
-            )
-            _insert_message(
-                cursor, request.conversation_id, "assistant", assistant_reply
-            )
-            conn.commit()
-
-        return ResponseModel[ChatResponse](
-            data=ChatResponse(
-                assistant_reply=assistant_reply, conversation_id=request.conversation_id
-            ),
-            detail="Reply and title generated successfully",
+    # User provided a conversation ID but it doesn't exist
+    if request.conversation_id and not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID {request.conversation_id} not found",
+        )
+    # User provided a conversation ID but the conversation doesn't belong to them
+    elif request.conversation_id and conversation.user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to access conversation {request.conversation_id}",
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    assistant = assistant_mapping[conversation.assistant](conversation)
+    assistant_reply = assistant.invoke(request.user_message)
+
+    _insert_message(cursor, request.conversation_id, "user", request.user_message)
+    _insert_message(cursor, request.conversation_id, "assistant", assistant_reply)
+
+    return ResponseModel[ChatResponse](
+        data=ChatResponse(
+            assistant_reply=assistant_reply, conversation_id=request.conversation_id
+        ),
+        detail="Reply and title generated successfully",
+    )
 
 
 @router.get(
@@ -112,79 +100,75 @@ def chat(
 )
 def get_chat_suggestions(
     assistant: AssistantSlug = Query(...),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(all_registered_users())),
 ):
 
-    with conn.cursor(dictionary=True) as cursor:
+    # Verify access to the requested assistant
+    user = get_user_by_id(cursor, current_user_id)
+    if not has_access_to_assistant(user.role, user.condition, assistant):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to chat with the requested assistant",
+        )
 
-        # Verify access to the requested assistant
-        user = get_user_by_id(cursor, current_user_id)
-        if not has_access_to_assistant(user.role, user.condition, assistant):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to chat with the requested assistant",
-            )
+    suggestions: list[str] = []
+    if assistant == "clinician-breast-cancer":
+        operation = """
+            SELECT p.id
+            FROM breast_cancer_patients AS p
+            JOIN breast_cancer_explanations AS e
+            ON e.patient_id = p.id
+            WHERE p.clinician_user_id = %s
+            ORDER BY p.updated_at DESC
+            LIMIT 1;
+        """
+        params = (current_user_id,)
+        cursor.execute(operation, params)
+        row = cursor.fetchone()
+        if row is not None:
+            patient_id = row["id"]
+            suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
+            suggestions.append(suggestion)
 
-        suggestions: list[str] = []
-        if assistant == "clinician-breast-cancer":
-            operation = """
-                SELECT p.id
-                FROM breast_cancer_patients AS p
-                JOIN breast_cancer_explanations AS e
-                ON e.patient_id = p.id
-                WHERE p.clinician_user_id = %s
-                ORDER BY p.updated_at DESC
-                LIMIT 1;
-            """
-            params = (current_user_id,)
-            cursor.execute(operation, params)
-            row = cursor.fetchone()
-            if row is not None:
-                patient_id = row["id"]
+        suggestions.append("What are some recruiting breast cancer clinical trials?")
+
+    elif assistant == "clinician-pediatric-appendicitis":
+        operation = """
+            SELECT p.id, p.diagnosis, p.management
+            FROM pediatric_appendicitis_patients AS p
+            JOIN pediatric_appendicitis_explanations AS e
+            ON e.patient_id = p.id
+            WHERE p.clinician_user_id = %s
+            ORDER BY p.updated_at DESC
+            LIMIT 1;
+        """
+        params = (current_user_id,)
+        cursor.execute(operation, params)
+        row = cursor.fetchone()
+        if row is not None:
+            patient_id = row["id"]
+            # If one of the patient's outcomes is the positive class, tell them to ask for explanation
+            if row["diagnosis"] == "appendicitis":
                 suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
-                suggestions.append(suggestion)
+            elif row["management"] == "surgical":
+                suggestion = f"Can you explain patient {patient_id}'s management?"
+            # If both diagnosis and management are negative class, default to diagnosis explanation
+            else:
+                suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
+            suggestions.append(suggestion)
 
-            suggestions.append(
-                "What are some recruiting breast cancer clinical trials?"
-            )
+        suggestions.append(
+            "Are there any recruiting clinical trials for pediatric appendicitis?"
+        )
 
-        elif assistant == "clinician-pediatric-appendicitis":
-            operation = """
-                SELECT p.id, p.diagnosis, p.management
-                FROM pediatric_appendicitis_patients AS p
-                JOIN pediatric_appendicitis_explanations AS e
-                ON e.patient_id = p.id
-                WHERE p.clinician_user_id = %s
-                ORDER BY p.updated_at DESC
-                LIMIT 1;
-            """
-            params = (current_user_id,)
-            cursor.execute(operation, params)
-            row = cursor.fetchone()
-            if row is not None:
-                patient_id = row["id"]
-                # If one of the patient's outcomes is the positive class, tell them to ask for explanation
-                if row["diagnosis"] == "appendicitis":
-                    suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
-                elif row["management"] == "surgical":
-                    suggestion = f"Can you explain patient {patient_id}'s management?"
-                # If both diagnosis and management are negative class, default to diagnosis explanation
-                else:
-                    suggestion = f"Can you explain patient {patient_id}'s diagnosis?"
-                suggestions.append(suggestion)
+    elif assistant == "patient-breast-cancer":
+        suggestions.append("What are some common breast cancer recovery struggles?")
 
-            suggestions.append(
-                "Are there any recruiting clinical trials for pediatric appendicitis?"
-            )
-
-        elif assistant == "patient-breast-cancer":
-            suggestions.append("What are some common breast cancer recovery struggles?")
-
-        elif assistant == "patient-pediatric-appendicitis":
-            suggestions.append(
-                "What are some common recovery struggles with appendicitis in kids?"
-            )
+    elif assistant == "patient-pediatric-appendicitis":
+        suggestions.append(
+            "What are some common recovery struggles with appendicitis in kids?"
+        )
 
     return ResponseModel[list[str]](
         detail="No suggestions available" if len(suggestions) == 0 else "",

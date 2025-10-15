@@ -18,7 +18,7 @@ from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
     get_conversation_by_id,
-    get_db_connection,
+    get_db_cursor,
     get_pediatric_appendicitis_patient_by_id,
     get_user_by_id,
 )
@@ -56,75 +56,63 @@ router = APIRouter(
 )
 def start_conversation(
     request: StartConversationRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(all_registered_users())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            # Verify access to the requested assistant
-            user = get_user_by_id(cursor, current_user_id)
-            if not has_access_to_assistant(
-                user.role, user.condition, request.assistant
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to chat with the requested assistant",
-                )
-
-            # If patient_id is provided, ensure the user has access to this patient
-            if request.patient_id is not None:
-                if request.assistant == "clinician-breast-cancer":
-                    patient = get_breast_cancer_patient_by_id(
-                        cursor, request.patient_id
-                    )
-                else:
-                    patient = get_pediatric_appendicitis_patient_by_id(
-                        cursor, request.patient_id
-                    )
-
-                if patient is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Patient with ID {request.patient_id} not found",
-                    )
-
-                print(patient)
-
-                if patient.clinician_user_id != current_user_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Not authorized to chat about patient with ID {request.patient_id}",
-                    )
-
-            assistant_class = assistant_mapping[request.assistant]
-            conversation_title = assistant_class.get_title(request.user_message)
-
-            operation = """
-                INSERT INTO conversations (user_id, patient_id, title, assistant)
-                VALUES (%s, %s, %s, %s)
-            """
-            params = (
-                current_user_id,
-                request.patient_id,
-                conversation_title,
-                request.assistant,
-            )
-            cursor.execute(operation, params)
-            conversation_id = cursor.lastrowid
-        conn.commit()
-
-        return ResponseModel[StartConversationResponse](
-            data=StartConversationResponse(
-                conversation_id=conversation_id, conversation_title=conversation_title
-            ),
-            detail="Conversation started successfully",
+    # Verify access to the requested assistant
+    user = get_user_by_id(cursor, current_user_id)
+    if not has_access_to_assistant(user.role, user.condition, request.assistant):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to chat with the requested assistant",
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    # If patient_id is provided, ensure the user has access to this patient
+    if request.patient_id is not None:
+        if request.assistant == "clinician-breast-cancer":
+            patient = get_breast_cancer_patient_by_id(cursor, request.patient_id)
+        else:
+            patient = get_pediatric_appendicitis_patient_by_id(
+                cursor, request.patient_id
+            )
+
+        if patient is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Patient with ID {request.patient_id} not found",
+            )
+
+        print(patient)
+
+        if patient.clinician_user_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Not authorized to chat about patient with ID {request.patient_id}",
+            )
+
+    assistant_class = assistant_mapping[request.assistant]
+    conversation_title = assistant_class.get_title(request.user_message)
+
+    operation = """
+        INSERT INTO conversations (user_id, patient_id, title, assistant)
+        VALUES (%s, %s, %s, %s)
+    """
+    params = (
+        current_user_id,
+        request.patient_id,
+        conversation_title,
+        request.assistant,
+    )
+    cursor.execute(operation, params)
+    conversation_id = cursor.lastrowid
+
+    return ResponseModel[StartConversationResponse](
+        data=StartConversationResponse(
+            conversation_id=conversation_id, conversation_title=conversation_title
+        ),
+        detail="Conversation started successfully",
+    )
 
 
 def _get_conversation_history(
@@ -165,36 +153,30 @@ def get_conversation(
     conversation_id: int = Path(
         description="ID of the conversation to return", example=1
     ),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(all_registered_users())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            conversation = get_conversation_by_id(cursor, conversation_id)
-            if not conversation:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Conversation with ID {conversation_id} not found",
-                )
-            if conversation.user_id != current_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Not authorized to access conversation with ID {conversation_id}",
-                )
-
-            messages = _get_conversation_history(cursor, conversation_id)
-
-        return ResponseModel[GetConversationResponse](
-            data=GetConversationResponse(
-                messages=messages, patient_id=conversation.patient_id
-            ),
-            detail="Conversation fetched successfully",
+    conversation = get_conversation_by_id(cursor, conversation_id)
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID {conversation_id} not found",
+        )
+    if conversation.user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to access conversation with ID {conversation_id}",
         )
 
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    messages = _get_conversation_history(cursor, conversation_id)
+
+    return ResponseModel[GetConversationResponse](
+        data=GetConversationResponse(
+            messages=messages, patient_id=conversation.patient_id
+        ),
+        detail="Conversation fetched successfully",
+    )
 
 
 @router.get(
@@ -206,36 +188,30 @@ def get_conversation(
     status_code=status.HTTP_200_OK,
 )
 def get_user_conversations(
-    conn: MySQLConnection = Depends(get_db_connection),
     assistant: AssistantSlug | None = Query(
         default=None, description="Type of assistant to filter conversations by"
     ),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(all_registered_users())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            where_clause = "user_id=%s"
-            params = (current_user_id,)
-            if assistant:
-                where_clause += " AND assistant=%s"
-                params = params + (assistant,)
+    where_clause = "user_id=%s"
+    params = (current_user_id,)
+    if assistant:
+        where_clause += " AND assistant=%s"
+        params = params + (assistant,)
 
-            operation = f"""
-                SELECT id, title, patient_id
-                FROM conversations
-                WHERE {where_clause}
-                ORDER BY updated_at DESC, id DESC
-            """
-            cursor.execute(operation, params)
+    operation = f"""
+        SELECT id, title, patient_id
+        FROM conversations
+        WHERE {where_clause}
+        ORDER BY updated_at DESC, id DESC
+    """
+    cursor.execute(operation, params)
 
-            rows = cursor.fetchall()
+    rows = cursor.fetchall()
 
-        conversations = [ConversationSummary(**row) for row in rows]
-        return ResponseModel[list[ConversationSummary]](
-            data=conversations, detail="Fetched conversations successfully"
-        )
-
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    conversations = [ConversationSummary(**row) for row in rows]
+    return ResponseModel[list[ConversationSummary]](
+        data=conversations, detail="Fetched conversations successfully"
+    )

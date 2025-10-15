@@ -5,7 +5,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.utils.db import db_connection_cm, get_breast_cancer_patient_by_id
+from app.utils.db import get_breast_cancer_patient_by_id, get_db_cursor_cm
 
 
 class GetPatientInfoInput(BaseModel):
@@ -31,10 +31,8 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
         )
 
-    with db_connection_cm() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-
-            patient = get_breast_cancer_patient_by_id(cursor, patient_id)
+    with get_db_cursor_cm() as cursor:
+        patient = get_breast_cancer_patient_by_id(cursor, patient_id)
 
     if patient is None:
         raise HTTPException(
@@ -76,20 +74,19 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
         )
 
-    with db_connection_cm() as conn:
-        with conn.cursor(dictionary=True) as cursor:
+    with get_db_cursor_cm() as cursor:
 
-            operation = """
-                SELECT bce.explanation,
-                    bcp.user_id
-                FROM breast_cancer_explanations AS bce
-                JOIN breast_cancer_patients AS bcp
-                ON bce.patient_id = bcp.id
-                WHERE bce.patient_id = %s
-            """
-            params = (patient_id,)
-            cursor.execute(operation, params)
-            row = cursor.fetchone()
+        operation = """
+            SELECT bce.explanation,
+                bcp.user_id
+            FROM breast_cancer_explanations AS bce
+            JOIN breast_cancer_patients AS bcp
+            ON bce.patient_id = bcp.id
+            WHERE bce.patient_id = %s
+        """
+        params = (patient_id,)
+        cursor.execute(operation, params)
+        row = cursor.fetchone()
 
     if row is None:
         raise HTTPException(

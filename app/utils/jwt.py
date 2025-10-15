@@ -7,10 +7,11 @@ from dotenv import find_dotenv, load_dotenv
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mysql.connector import MySQLConnection
+from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.auth_models import TokenPayload, TokenType
 from app.models.user_models import Condition, Role, RoleAndCondition, User
-from app.utils.db import get_db_connection, get_user_by_id
+from app.utils.db import get_db_cursor, get_user_by_id
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -104,7 +105,7 @@ security = HTTPBearer(
 
 def get_and_validate_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ) -> User:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
@@ -113,12 +114,11 @@ def get_and_validate_current_user(
     token = credentials.credentials
     payload = decode_and_validate_jwt(token, expected_token_type=TokenType.ACCESS)
     user_id = int(payload.sub)
-    with conn.cursor(dictionary=True) as cursor:
-        user = get_user_by_id(cursor, user_id)
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
-            )
+    user = get_user_by_id(cursor, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
     return user
 
 
@@ -139,20 +139,26 @@ def require_access(policy: AccessPolicy):
         if user.role == Role.CLINICIAN:
             if policy.allow_clinicians:
                 return user.id
-            raise HTTPException(status_code=403, detail="Clinician access not allowed")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Clinician access not allowed",
+            )
 
         if user.role == Role.PATIENT:
             if policy.patient_conditions is None:
                 raise HTTPException(
-                    status_code=403, detail="Patient access not allowed"
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Patient access not allowed",
                 )
             if user.condition in policy.patient_conditions:
                 return user.id
             raise HTTPException(
-                status_code=403,
+                status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Patient condition '{user.condition}' not allowed",
             )
-        raise HTTPException(status_code=403, detail="Unsupported role")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Unsupported role"
+        )
 
     return _dependency
 

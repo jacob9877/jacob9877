@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.utils.db import db_connection_cm, get_pediatric_appendicitis_patient_by_id
+from app.utils.db import get_db_cursor_cm, get_pediatric_appendicitis_patient_by_id
 
 
 class GetPatientInfoInput(BaseModel):
@@ -30,10 +30,8 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
         )
 
-    with db_connection_cm() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-
-            patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
+    with get_db_cursor_cm() as cursor:
+        patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
     if patient is None:
         raise HTTPException(
@@ -89,20 +87,18 @@ def explain_diagnosis(
 
     explanation_column = f"{prediction}_explanation"
 
-    with db_connection_cm() as conn:
-        with conn.cursor(dictionary=True) as cursor:
-
-            operation = f"""
-                SELECT pae.{explanation_column},
-                    pap.user_id
-                FROM pediatric_appendicitis_explanations AS pae
-                JOIN pediatric_appendicitis_patients AS pap
-                ON pae.patient_id = pap.id
-                WHERE pae.patient_id = %s
-            """
-            params = (patient_id,)
-            cursor.execute(operation, params)
-            row = cursor.fetchone()
+    with get_db_cursor_cm() as cursor:
+        operation = f"""
+            SELECT pae.{explanation_column},
+                pap.user_id
+            FROM pediatric_appendicitis_explanations AS pae
+            JOIN pediatric_appendicitis_patients AS pap
+            ON pae.patient_id = pap.id
+            WHERE pae.patient_id = %s
+        """
+        params = (patient_id,)
+        cursor.execute(operation, params)
+        row = cursor.fetchone()
 
     if row is None:
         raise HTTPException(

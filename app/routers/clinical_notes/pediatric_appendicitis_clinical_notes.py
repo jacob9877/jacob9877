@@ -2,12 +2,13 @@ import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from mysql.connector import MySQLConnection
+from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.clinical_notes_models import ClinicalNote, UpsertClinicalNoteRequest
 from app.models.common_models import ResponseModel
 from app.models.user_models import Condition
 from app.utils.db import (
-    get_db_connection,
+    get_db_cursor,
     get_pediatric_appendicitis_clinical_note_by_id,
     get_pediatric_appendicitis_patient_by_id,
 )
@@ -16,54 +17,41 @@ from app.utils.jwt import clinicians_only, require_access
 
 def validate_patient_id(
     patient_id: int,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(
         require_access(clinicians_only())
     ),  # Keep the auth here to not call it twice
 ) -> None:
-    try:
-        with conn.cursor(dictionary=True) as cursor:
-            patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
-            if patient is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found"
-                )
+    patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
-            if patient.clinician_user_id != current_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to access this patient's clinical notes",
-                )
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found"
+        )
 
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    if patient.clinician_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this patient's clinical notes",
+        )
 
 
 def validate_note_id(
-    patient_id: int, note_id: int, conn: MySQLConnection = Depends(get_db_connection)
+    patient_id: int, note_id: int, cursor: MySQLCursorDict = Depends(get_db_cursor)
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            clinical_note = get_pediatric_appendicitis_clinical_note_by_id(
-                cursor, note_id
-            )
-            if clinical_note is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Note not found"
-                )
+    clinical_note = get_pediatric_appendicitis_clinical_note_by_id(cursor, note_id)
+    if clinical_note is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Note not found"
+        )
 
-            if clinical_note.patient_id != patient_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Requested note id does not belong to requested patient",
-                )
-
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    if clinical_note.patient_id != patient_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Requested note id does not belong to requested patient",
+        )
 
 
 router = APIRouter(
@@ -98,30 +86,24 @@ router = APIRouter(
 )
 def get_clinical_notes(
     patient_id: int,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            operation = """
-                SELECT *
-                FROM pediatric_appendicitis_clinical_notes
-                WHERE patient_id = %s
-                ORDER BY updated_at DESC, id DESC
-            """
-            params = (patient_id,)
-            cursor.execute(operation, params)
-            rows = cursor.fetchall()
+    operation = """
+        SELECT *
+        FROM pediatric_appendicitis_clinical_notes
+        WHERE patient_id = %s
+        ORDER BY updated_at DESC, id DESC
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    rows = cursor.fetchall()
 
-            clinical_notes = [ClinicalNote(**row) for row in rows]
+    clinical_notes = [ClinicalNote(**row) for row in rows]
 
-        return ResponseModel[list[ClinicalNote]](
-            data=clinical_notes, detail="Successfully retrieved clinical notes"
-        )
-
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    return ResponseModel[list[ClinicalNote]](
+        data=clinical_notes, detail="Successfully retrieved clinical notes"
+    )
 
 
 @router.get(
@@ -136,22 +118,14 @@ def get_clinical_notes(
 def get_clinical_note(
     patient_id: int,
     note_id: int,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            clinical_note = get_pediatric_appendicitis_clinical_note_by_id(
-                cursor, note_id
-            )
+    clinical_note = get_pediatric_appendicitis_clinical_note_by_id(cursor, note_id)
 
-        return ResponseModel[ClinicalNote](
-            data=clinical_note, detail="Successfully retrieved clinical note"
-        )
-
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    return ResponseModel[ClinicalNote](
+        data=clinical_note, detail="Successfully retrieved clinical note"
+    )
 
 
 @router.post(
@@ -165,34 +139,23 @@ def get_clinical_note(
 def add_clinical_note(
     patient_id: int,
     add_clinical_note_request: UpsertClinicalNoteRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            # Insert the new note
-            operation = """
-                INSERT INTO pediatric_appendicitis_clinical_notes (patient_id, content)
-                VALUES (%s, %s)
-            """
-            params = (patient_id, add_clinical_note_request.content)
-            cursor.execute(operation, params)
-            note_id = cursor.lastrowid
+    # Insert the new note
+    operation = """
+        INSERT INTO pediatric_appendicitis_clinical_notes (patient_id, content)
+        VALUES (%s, %s)
+    """
+    params = (patient_id, add_clinical_note_request.content)
+    cursor.execute(operation, params)
+    note_id = cursor.lastrowid
 
-            clinical_note = get_pediatric_appendicitis_clinical_note_by_id(
-                cursor, note_id
-            )
+    clinical_note = get_pediatric_appendicitis_clinical_note_by_id(cursor, note_id)
 
-        conn.commit()
-
-        return ResponseModel[ClinicalNote](
-            data=clinical_note, detail="Successfully added clinical note"
-        )
-
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    return ResponseModel[ClinicalNote](
+        data=clinical_note, detail="Successfully added clinical note"
+    )
 
 
 @router.put(
@@ -208,34 +171,23 @@ def update_clinical_note(
     patient_id: int,
     note_id: int,
     edit_clinical_note_request: UpsertClinicalNoteRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            # Insert the new note
-            operation = """
-                UPDATE pediatric_appendicitis_clinical_notes
-                SET content = %s
-                WHERE id = %s
-            """
-            params = (edit_clinical_note_request.content, note_id)
-            cursor.execute(operation, params)
+    # Insert the new note
+    operation = """
+        UPDATE pediatric_appendicitis_clinical_notes
+        SET content = %s
+        WHERE id = %s
+    """
+    params = (edit_clinical_note_request.content, note_id)
+    cursor.execute(operation, params)
 
-            clinical_note = get_pediatric_appendicitis_clinical_note_by_id(
-                cursor, note_id
-            )
+    clinical_note = get_pediatric_appendicitis_clinical_note_by_id(cursor, note_id)
 
-        conn.commit()
-
-        return ResponseModel[ClinicalNote](
-            data=clinical_note, detail="Successfully edited clinical note"
-        )
-
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    return ResponseModel[ClinicalNote](
+        data=clinical_note, detail="Successfully edited clinical note"
+    )
 
 
 @router.delete(
@@ -250,26 +202,15 @@ def update_clinical_note(
 def delete_clinical_note(
     patient_id: int,
     note_id: int,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            # Insert the new note
-            operation = """
-                DELETE FROM pediatric_appendicitis_clinical_notes
-                WHERE id = %s
-            """
-            params = (note_id,)
-            cursor.execute(operation, params)
+    # Insert the new note
+    operation = """
+        DELETE FROM pediatric_appendicitis_clinical_notes
+        WHERE id = %s
+    """
+    params = (note_id,)
+    cursor.execute(operation, params)
 
-        conn.commit()
-
-        return ResponseModel[None](
-            data=None, detail="Successfully deleted clinical note"
-        )
-
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    return ResponseModel[None](data=None, detail="Successfully deleted clinical note")

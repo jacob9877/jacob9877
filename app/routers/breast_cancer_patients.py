@@ -33,7 +33,7 @@ from app.routers.clinical_notes import breast_cancer_clinical_notes
 from app.utils.aws import bulk_send_message_to_sqs, get_predictions
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
-    get_db_connection,
+    get_db_cursor,
     insert_pending_email,
 )
 from app.utils.file_parser import parse_csv
@@ -121,48 +121,37 @@ def _add_patients(
 )
 def add_patient(
     add_patient_request: AddBreastCancerPatientRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            add_patients_request = AddBreastCancerPatientsRequest(
-                patients=[add_patient_request.model_dump(exclude={"email"})]
-            )
+    add_patients_request = AddBreastCancerPatientsRequest(
+        patients=[add_patient_request.model_dump(exclude={"email"})]
+    )
 
-            inserted_id = _add_patients(cursor, current_user_id, add_patients_request)[
-                0
-            ]
+    inserted_id = _add_patients(cursor, current_user_id, add_patients_request)[0]
 
-            # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
-            inserted_patient = get_breast_cancer_patient_by_id(cursor, inserted_id)
+    # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
+    inserted_patient = get_breast_cancer_patient_by_id(cursor, inserted_id)
 
-            if add_patient_request.email:
-                insert_pending_email(
-                    cursor,
-                    add_patient_request.email,
-                    inserted_id,
-                    "breast_cancer_patients",
-                )
-
-        # Send the new patient info to SQS for explanation processing
-        messages = [
-            inserted_patient.model_dump(include=set(FEATURE_NAMES))
-            | {"patient_id": inserted_patient.id}
-        ]
-        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
-
-        conn.commit()
-
-        return ResponseModel[BreastCancerPatient](
-            data=inserted_patient, detail="Patients added successfully"
+    if add_patient_request.email:
+        insert_pending_email(
+            cursor,
+            add_patient_request.email,
+            inserted_id,
+            "breast_cancer_patients",
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    # Send the new patient info to SQS for explanation processing
+    messages = [
+        inserted_patient.model_dump(include=set(FEATURE_NAMES))
+        | {"patient_id": inserted_patient.id}
+    ]
+    bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+
+    return ResponseModel[BreastCancerPatient](
+        data=inserted_patient, detail="Patients added successfully"
+    )
 
 
 @router.post(
@@ -175,43 +164,36 @@ def add_patient(
 )
 def add_patients_json(
     add_patients_request: AddBreastCancerPatientsRequest,
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            inserted_ids = _add_patients(cursor, current_user_id, add_patients_request)
-            conn.commit()
-            # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
-            placeholders = ",".join(["%s"] * len(inserted_ids))
-            operation = f"""
-                SELECT * 
-                FROM breast_cancer_patients
-                WHERE id IN ({placeholders})
-                ORDER BY FIELD(id, {placeholders})
-            """
-            params = tuple(inserted_ids) * 2
-            cursor.execute(operation, params)
-            rows = cursor.fetchall()
+    inserted_ids = _add_patients(cursor, current_user_id, add_patients_request)
 
-        inserted_patients = [BreastCancerPatient(**row) for row in rows]
+    # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
+    placeholders = ",".join(["%s"] * len(inserted_ids))
+    operation = f"""
+        SELECT * 
+        FROM breast_cancer_patients
+        WHERE id IN ({placeholders})
+        ORDER BY FIELD(id, {placeholders})
+    """
+    params = tuple(inserted_ids) * 2
+    cursor.execute(operation, params)
+    rows = cursor.fetchall()
 
-        # Send the new patient info to SQS for explanation processing
-        messages = [
-            patient.model_dump(include=set(FEATURE_NAMES)) | {"patient_id": patient.id}
-            for patient in inserted_patients
-        ]
-        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+    inserted_patients = [BreastCancerPatient(**row) for row in rows]
 
-        return ResponseModel[list[BreastCancerPatient]](
-            data=inserted_patients, detail="Patients added successfully"
-        )
+    # Send the new patient info to SQS for explanation processing
+    messages = [
+        patient.model_dump(include=set(FEATURE_NAMES)) | {"patient_id": patient.id}
+        for patient in inserted_patients
+    ]
+    bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    return ResponseModel[list[BreastCancerPatient]](
+        data=inserted_patients, detail="Patients added successfully"
+    )
 
 
 @router.post(
@@ -230,51 +212,44 @@ def add_patients_json(
 )
 def add_patients_csv(
     file: UploadFile | None = File(None),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
 
-        file.file.seek(0)
-        content = file.file.read().decode("utf-8")
-        parsed_patients = parse_csv(content)
-        print(f"Parsed {len(parsed_patients)} patients from CSV.")
+    file.file.seek(0)
+    content = file.file.read().decode("utf-8")
+    parsed_patients = parse_csv(content)
+    print(f"Parsed {len(parsed_patients)} patients from CSV.")
 
-        # Load into request class to validate there's at least 1 patient
-        add_patients_request = AddBreastCancerPatientsRequest(patients=parsed_patients)
+    # Load into request class to validate there's at least 1 patient
+    add_patients_request = AddBreastCancerPatientsRequest(patients=parsed_patients)
 
-        with conn.cursor(dictionary=True) as cursor:
-            inserted_ids = _add_patients(cursor, current_user_id, add_patients_request)
-            conn.commit()
-            # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
-            placeholders = ",".join(["%s"] * len(inserted_ids))
-            operation = f"""
-                SELECT *
-                FROM breast_cancer_patients
-                WHERE id IN ({placeholders})
-                ORDER BY FIELD(id, {placeholders})
-            """
-            params = tuple(inserted_ids) * 2
-            cursor.execute(operation, params)
-            rows = cursor.fetchall()
+    inserted_ids = _add_patients(cursor, current_user_id, add_patients_request)
 
-        inserted_patients = [BreastCancerPatient(**row) for row in rows]
+    # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
+    placeholders = ",".join(["%s"] * len(inserted_ids))
+    operation = f"""
+        SELECT *
+        FROM breast_cancer_patients
+        WHERE id IN ({placeholders})
+        ORDER BY FIELD(id, {placeholders})
+    """
+    params = tuple(inserted_ids) * 2
+    cursor.execute(operation, params)
+    rows = cursor.fetchall()
 
-        # Send the new patient info to SQS for explanation processing
-        messages = [
-            patient.model_dump(include=set(FEATURE_NAMES)) | {"patient_id": patient.id}
-            for patient in inserted_patients
-        ]
-        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+    inserted_patients = [BreastCancerPatient(**row) for row in rows]
 
-        return ResponseModel[list[BreastCancerPatient]](
-            data=inserted_patients, detail="Patients added successfully"
-        )
+    # Send the new patient info to SQS for explanation processing
+    messages = [
+        patient.model_dump(include=set(FEATURE_NAMES)) | {"patient_id": patient.id}
+        for patient in inserted_patients
+    ]
+    bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    return ResponseModel[list[BreastCancerPatient]](
+        data=inserted_patients, detail="Patients added successfully"
+    )
 
 
 @router.get(
@@ -296,33 +271,27 @@ def add_patients_csv(
 )
 def get_patient(
     patient_id: int = Path(..., description="ID of the patient to get"),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            patient = get_breast_cancer_patient_by_id(cursor, patient_id)
+    patient = get_breast_cancer_patient_by_id(cursor, patient_id)
 
-        if patient is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Breast cancer patient with ID {patient_id} not found",
-            )
-
-        if patient.clinician_user_id != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Not authorized to access this patient",
-            )
-
-        return ResponseModel[BreastCancerPatient](
-            data=patient, detail="Patient fetched successfully"
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Breast cancer patient with ID {patient_id} not found",
         )
 
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    if patient.clinician_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to access this patient",
+        )
+
+    return ResponseModel[BreastCancerPatient](
+        data=patient, detail="Patient fetched successfully"
+    )
 
 
 @router.get(
@@ -355,84 +324,77 @@ def get_breast_cancer_patients_paginated(
         le=100,
         description="Max number of patients to return (1–100)",
     ),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        # Order is (updated_at DESC, id DESC).
-        # For "next page", fetch rows strictly "after" the cursor in that order:
-        # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
-        operation = """
-            SELECT *
-            FROM breast_cancer_patients
-            WHERE clinician_user_id = %s
+    # Order is (updated_at DESC, id DESC).
+    # For "next page", fetch rows strictly "after" the cursor in that order:
+    # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
+    operation = """
+        SELECT *
+        FROM breast_cancer_patients
+        WHERE clinician_user_id = %s
+    """
+
+    params = [current_user_id]
+
+    if cursor_token:
+        try:
+            last_timestamp, last_id = decode_cursor(cursor_token)
+        except:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
+            )
+        operation += """
+            AND (
+                updated_at < %s
+                OR (updated_at = %s AND id < %s)
+            )
         """
+        params.extend([last_timestamp, last_timestamp, last_id])
 
-        params = [current_user_id]
+    # Apply ORDER BY and LIMIT + 1 (to see if there's another page)
+    operation += " ORDER BY updated_at DESC, id DESC LIMIT %s"
+    params.append(limit + 1)
 
-        if cursor_token:
-            try:
-                last_timestamp, last_id = decode_cursor(cursor_token)
-            except:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
-                )
-            operation += """
-                AND (
-                    updated_at < %s
-                    OR (updated_at = %s AND id < %s)
-                )
-            """
-            params.extend([last_timestamp, last_timestamp, last_id])
+    cursor.execute(operation, tuple(params))
+    rows = cursor.fetchall()
 
-        # Apply ORDER BY and LIMIT + 1 (to see if there's another page)
-        operation += " ORDER BY updated_at DESC, id DESC LIMIT %s"
-        params.append(limit + 1)
+    # Get the total count while we have the cursor
+    operation = """
+        SELECT COUNT(*) 
+        AS count
+        FROM breast_cancer_patients
+        WHERE clinician_user_id = %s
+    """
+    params = (current_user_id,)
+    cursor.execute(operation, params)
+    result = cursor.fetchone()
+    total_count = result["count"]
 
-        with conn.cursor(dictionary=True) as cursor:
+    # Build response items and next cursor (if we fetched limit+1)
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]  # only return 'limit' items
 
-            cursor.execute(operation, tuple(params))
-            rows = cursor.fetchall()
+    patients = [BreastCancerPatient(**row) for row in rows]
 
-            # Get the total count while we have the cursor
-            operation = """
-                SELECT COUNT(*) 
-                AS count
-                FROM breast_cancer_patients
-                WHERE clinician_user_id = %s
-            """
-            params = (current_user_id,)
-            cursor.execute(operation, params)
-            result = cursor.fetchone()
-            total_count = result["count"]
+    next_cursor: str | None = None
+    if has_more and rows:
+        last_row = rows[-1]
+        last_updated_at: datetime = last_row["updated_at"]
+        last_row_id: int = last_row["id"]
+        next_cursor = encode_cursor(last_updated_at, last_row_id)
 
-        # Build response items and next cursor (if we fetched limit+1)
-        has_more = len(rows) > limit
-        if has_more:
-            rows = rows[:limit]  # only return 'limit' items
-
-        patients = [BreastCancerPatient(**row) for row in rows]
-
-        next_cursor: str | None = None
-        if has_more and rows:
-            last_row = rows[-1]
-            last_updated_at: datetime = last_row["updated_at"]
-            last_row_id: int = last_row["id"]
-            next_cursor = encode_cursor(last_updated_at, last_row_id)
-
-        paginated_patients = PaginatedBreastCancerPatients(
-            next_cursor=next_cursor,
-            total_count=total_count,
-            patients=patients,
-        )
-        return ResponseModel[PaginatedBreastCancerPatients](
-            data=paginated_patients,
-            detail="Patients retrieved successfully",
-        )
-
-    except Exception as e:
-        traceback.print_exc()
-        raise e
+    paginated_patients = PaginatedBreastCancerPatients(
+        next_cursor=next_cursor,
+        total_count=total_count,
+        patients=patients,
+    )
+    return ResponseModel[PaginatedBreastCancerPatients](
+        data=paginated_patients,
+        detail="Patients retrieved successfully",
+    )
 
 
 def _update_and_repredict(
@@ -520,48 +482,39 @@ def _update_and_repredict(
 )
 def repredict_patient(
     patient_id: int = Path(..., description="ID of the patient to re-predict"),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            patient = get_breast_cancer_patient_by_id(cursor, patient_id)
+    patient = get_breast_cancer_patient_by_id(cursor, patient_id)
 
-            if patient is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Breast cancer patient with ID {patient_id} not found",
-                )
-
-            if patient.clinician_user_id != current_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Not authorized to modify this patient",
-                )
-
-            updated_patient = _update_and_repredict(
-                cursor=cursor,
-                patient_id=patient_id,
-            )
-
-        conn.commit()
-
-        # Send the new patient info to SQS for explanation processing
-        messages = [
-            updated_patient.model_dump(include=set(FEATURE_NAMES))
-            | {"patient_id": updated_patient.id}
-        ]
-        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
-
-        return ResponseModel[BreastCancerPatient](
-            data=updated_patient, detail="Re-predicted successfully"
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Breast cancer patient with ID {patient_id} not found",
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    if patient.clinician_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to modify this patient",
+        )
+
+    updated_patient = _update_and_repredict(
+        cursor=cursor,
+        patient_id=patient_id,
+    )
+
+    # Send the new patient info to SQS for explanation processing
+    messages = [
+        updated_patient.model_dump(include=set(FEATURE_NAMES))
+        | {"patient_id": updated_patient.id}
+    ]
+    bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+
+    return ResponseModel[BreastCancerPatient](
+        data=updated_patient, detail="Re-predicted successfully"
+    )
 
 
 @router.patch(
@@ -587,54 +540,45 @@ def update_patient(
     new_patient_data: UpdateBreastCancerPatientRequest = Body(
         ..., description="Fields to update (at least one)"
     ),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            patient = get_breast_cancer_patient_by_id(cursor, patient_id)
+    patient = get_breast_cancer_patient_by_id(cursor, patient_id)
 
-            if patient is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Breast cancer patient with ID {patient_id} not found",
-                )
-
-            if patient.clinician_user_id != current_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Not authorized to modify this patient",
-                )
-
-            updated_patient = _update_and_repredict(
-                cursor=cursor,
-                patient_id=patient_id,
-                partial_update=new_patient_data,
-            )
-
-            if new_patient_data.email:
-                insert_pending_email(
-                    cursor, new_patient_data.email, patient_id, "breast_cancer_patients"
-                )
-
-        conn.commit()
-
-        # Send the new patient info to SQS for explanation processing
-        messages = [
-            updated_patient.model_dump(include=set(FEATURE_NAMES))
-            | {"patient_id": updated_patient.id}
-        ]
-        bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
-
-        return ResponseModel[BreastCancerPatient](
-            data=updated_patient, detail="Patient updated successfully"
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Breast cancer patient with ID {patient_id} not found",
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    if patient.clinician_user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to modify this patient",
+        )
+
+    updated_patient = _update_and_repredict(
+        cursor=cursor,
+        patient_id=patient_id,
+        partial_update=new_patient_data,
+    )
+
+    if new_patient_data.email:
+        insert_pending_email(
+            cursor, new_patient_data.email, patient_id, "breast_cancer_patients"
+        )
+
+    # Send the new patient info to SQS for explanation processing
+    messages = [
+        updated_patient.model_dump(include=set(FEATURE_NAMES))
+        | {"patient_id": updated_patient.id}
+    ]
+    bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
+
+    return ResponseModel[BreastCancerPatient](
+        data=updated_patient, detail="Patient updated successfully"
+    )
 
 
 @router.delete(
@@ -662,57 +606,48 @@ def delete_patients(
         description="List of patient IDs to delete",
         example="ids=1&ids=2&ids=3",
     ),
-    conn: MySQLConnection = Depends(get_db_connection),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-    try:
-        with conn.cursor(dictionary=True) as cursor:
 
-            # Verify all IDs exist
-            placeholders = ",".join(["%s"] * len(patient_ids))
-            operation = f"""
-                SELECT id, clinician_user_id
-                FROM breast_cancer_patients
-                WHERE id IN ({placeholders})
-            """
-            params = tuple(patient_ids)
-            cursor.execute(operation, params)
+    # Verify all IDs exist
+    placeholders = ",".join(["%s"] * len(patient_ids))
+    operation = f"""
+        SELECT id, clinician_user_id
+        FROM breast_cancer_patients
+        WHERE id IN ({placeholders})
+    """
+    params = tuple(patient_ids)
+    cursor.execute(operation, params)
 
-            rows = cursor.fetchall()
+    rows = cursor.fetchall()
 
-            found_ids = [row["id"] for row in rows]
-            missing_ids = [pid for pid in patient_ids if pid not in found_ids]
-            if missing_ids:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Patient IDs not found: {missing_ids}",
-                )
-
-            forbidden_ids = [
-                row["id"] for row in rows if row["clinician_user_id"] != current_user_id
-            ]
-            if forbidden_ids:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Not authorized to delete these patients {forbidden_ids}",
-                )
-
-            # Perform delete
-            operation = f"""
-                DELETE FROM breast_cancer_patients
-                WHERE id IN ({placeholders})
-            """
-            params = tuple(patient_ids)
-            cursor.execute(operation, params)
-
-        conn.commit()
-
-        return ResponseModel[list[int]](
-            data=patient_ids,
-            detail=f"Deleted {len(patient_ids)} patients successfully",
+    found_ids = [row["id"] for row in rows]
+    missing_ids = [pid for pid in patient_ids if pid not in found_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Patient IDs not found: {missing_ids}",
         )
 
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        raise e
+    forbidden_ids = [
+        row["id"] for row in rows if row["clinician_user_id"] != current_user_id
+    ]
+    if forbidden_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to delete these patients {forbidden_ids}",
+        )
+
+    # Perform delete
+    operation = f"""
+        DELETE FROM breast_cancer_patients
+        WHERE id IN ({placeholders})
+    """
+    params = tuple(patient_ids)
+    cursor.execute(operation, params)
+
+    return ResponseModel[list[int]](
+        data=patient_ids,
+        detail=f"Deleted {len(patient_ids)} patients successfully",
+    )
