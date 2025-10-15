@@ -155,7 +155,7 @@ class PediatricAppendicitisPatientWithImages(PediatricAppendicitisPatient):
 class UpsertPediatricAppendicitisPatientRequest(BaseModel):
     features: PediatricAppendicitisPatientFeatures
     image_upload_ids: list[str] | None = []
-    email: EmailStr
+    email: EmailStr | None = None
 
 
 class S3Uri(BaseModel):
