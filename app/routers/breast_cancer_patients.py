@@ -29,6 +29,7 @@ from app.models.breast_cancer_patient_models import (
 )
 from app.models.common_models import ResponseModel
 from app.models.user_models import Condition, Role
+from app.routers.clinical_notes import breast_cancer_clinical_notes
 from app.utils.aws import bulk_send_message_to_sqs, get_predictions
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
@@ -49,6 +50,8 @@ router = APIRouter(
         },
     },
 )
+
+router.include_router(breast_cancer_clinical_notes.router)
 
 SAGEMAKER_ENDPOINT_NAME = "breast-cancer-classifier"
 EXPLAINER_LAMBDA_NAME = "breast-cancer-classifier-explainer"
@@ -133,14 +136,7 @@ def add_patient(
             ]
 
             # We can't put all this fetching of the patients logic inside the _add_patients function because we need the connection to commit the new patients beforehand
-            operation = """
-                SELECT * 
-                FROM breast_cancer_patients
-                WHERE id = %s
-            """
-            params = (inserted_id,)
-            cursor.execute(operation, params)
-            row = cursor.fetchone()
+            inserted_patient = get_breast_cancer_patient_by_id(cursor, inserted_id)
 
             if add_patient_request.email:
                 insert_pending_email(
@@ -149,8 +145,6 @@ def add_patient(
                     inserted_id,
                     "breast_cancer_patients",
                 )
-
-        inserted_patient = BreastCancerPatient(**row)
 
         # Send the new patient info to SQS for explanation processing
         messages = [
@@ -502,16 +496,8 @@ def _update_and_repredict(
     )
     cursor.execute(operation, params)
 
-    # Return full row
-    operation = """
-        SELECT *
-        FROM breast_cancer_patients
-        WHERE id=%s
-    """
-    params = (patient_id,)
-    cursor.execute(operation, params)
-    row = cursor.fetchone()
-    return BreastCancerPatient(**row)
+    updated_patient = get_breast_cancer_patient_by_id(cursor, patient_id)
+    return updated_patient
 
 
 @router.post(

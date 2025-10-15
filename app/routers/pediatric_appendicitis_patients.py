@@ -21,6 +21,7 @@ from app.models.pediatric_appendicitis_models import (
     S3Uri,
     UpsertPediatricAppendicitisPatientRequest,
 )
+from app.routers.clinical_notes import pediatric_appendicitis_clinical_notes
 from app.utils.aws import (
     bulk_send_message_to_sqs,
     create_presigned_post_for_image,
@@ -46,6 +47,8 @@ router = APIRouter(
         },
     },
 )
+
+router.include_router(pediatric_appendicitis_clinical_notes.router)
 
 IMAGES_BUCKET = "pediatric-appendicitis-images"
 SAGEMAKER_ENDPOINT_NAME = "pediatric-appendicitis"

@@ -9,6 +9,7 @@ from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
+from app.models.clinical_notes_models import ClinicalNote
 from app.models.conversation_models import Conversation
 from app.models.pediatric_appendicitis_models import PediatricAppendicitisPatient
 from app.models.user_models import Condition, User
@@ -123,6 +124,38 @@ def get_pediatric_appendicitis_patient_by_id(
     if row is None:
         return None
     return PediatricAppendicitisPatient(**row)
+
+
+def get_breast_cancer_clinical_note_by_id(
+    cursor: MySQLCursorDict, note_id: int
+) -> ClinicalNote | None:
+    operation = """
+        SELECT *
+        FROM breast_cancer_clinical_notes
+        WHERE id = %s
+    """
+    params = (note_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return ClinicalNote(**row)
+
+
+def get_pediatric_appendicitis_clinical_note_by_id(
+    cursor: MySQLCursorDict, note_id: int
+) -> ClinicalNote | None:
+    operation = """
+        SELECT *
+        FROM pediatric_appendicitis_clinical_notes
+        WHERE id = %s
+    """
+    params = (note_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return ClinicalNote(**row)
 
 
 def insert_pending_email(
@@ -274,6 +307,8 @@ def insert_pending_email(
         WHERE id = %s
     """
     params = (email, target_patient_id)
+    cursor.execute(operation, params)
+    cursor.execute(operation, params)
     cursor.execute(operation, params)
     cursor.execute(operation, params)
     cursor.execute(operation, params)
