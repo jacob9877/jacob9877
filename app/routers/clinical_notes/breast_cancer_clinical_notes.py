@@ -39,7 +39,7 @@ def validate_patient_id(
 
 def validate_note_id(
     patient_id: int, note_id: int, cursor: MySQLCursorDict = Depends(get_db_cursor)
-):
+) -> ClinicalNote:
 
     clinical_note = get_breast_cancer_clinical_note_by_id(cursor, note_id)
     if clinical_note is None:
@@ -52,6 +52,8 @@ def validate_note_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Requested note id does not belong to requested patient",
         )
+
+    return clinical_note
 
 
 router = APIRouter(
@@ -108,7 +110,6 @@ def get_clinical_notes(
 
 @router.get(
     "/{note_id}",
-    dependencies=[Depends(validate_note_id)],
     summary="Get clinical note",
     description="Get a clinical note for a patient by the note's ID",
     response_model=ResponseModel[ClinicalNote],
@@ -116,13 +117,8 @@ def get_clinical_notes(
     status_code=status.HTTP_200_OK,
 )
 def get_clinical_note(
-    patient_id: int,
-    note_id: int,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    clinical_note: ClinicalNote = Depends(validate_note_id),
 ):
-
-    clinical_note = get_breast_cancer_clinical_note_by_id(cursor, note_id)
-
     return ResponseModel[ClinicalNote](
         data=clinical_note, detail="Successfully retrieved clinical note"
     )
@@ -168,7 +164,6 @@ def add_clinical_note(
     status_code=status.HTTP_200_OK,
 )
 def update_clinical_note(
-    patient_id: int,
     note_id: int,
     edit_clinical_note_request: UpsertClinicalNoteRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
@@ -199,7 +194,6 @@ def update_clinical_note(
     status_code=status.HTTP_200_OK,
 )
 def delete_clinical_note(
-    patient_id: int,
     note_id: int,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
