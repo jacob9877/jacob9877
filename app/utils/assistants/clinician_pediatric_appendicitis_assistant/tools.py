@@ -55,12 +55,10 @@ class GetPatientExplanationInput(BaseModel):
         description="The integer ID (MySQL PK) of the pediatric appendicitis patient to retrieve explanation for",
         example=123,
     )
-    prediction: Literal["diagnosis", "management", "severity", "length_of_stay"] = (
-        Field(
-            ...,
-            description="The prediction to get an explanation for",
-            example="diagnosis",
-        )
+    prediction: Literal["diagnosis", "management", "length_of_stay"] = Field(
+        ...,
+        description="The prediction to get an explanation for",
+        example="diagnosis",
     )
 
 
@@ -70,7 +68,7 @@ class GetPatientExplanationInput(BaseModel):
 )
 def explain_diagnosis(
     patient_id: int,
-    prediction: Literal["diagnosis", "management", "severity", "length_of_stay"],
+    prediction: Literal["diagnosis", "management", "length_of_stay"],
     *,
     config: RunnableConfig,
 ) -> dict:

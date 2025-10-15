@@ -124,7 +124,6 @@ FEATURE_NAMES = list(PediatricAppendicitisPatientFeatures.model_fields.keys())
 class PediatricAppendicitisPredictions(BaseModel):
     diagnosis: Literal["appendicitis", "no appendicitis"]
     management: Literal["conservative", "surgical"]
-    severity: Literal["complicated", "uncomplicated"]
     length_of_stay_pred: float
     length_of_stay_pi_lower: float
     length_of_stay_pi_upper: float

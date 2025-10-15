@@ -240,7 +240,6 @@ def add_patient(
     features = {
         "Diagnosis": predictions_validated.diagnosis,
         "Management": predictions_validated.management,
-        "Severity": predictions_validated.severity,
     } | patient_with_images.model_dump(include=set(FEATURE_NAMES))
     messages = [
         {

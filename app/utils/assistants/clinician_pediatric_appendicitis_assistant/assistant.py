@@ -42,8 +42,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
             You are part of a system that uses machine learning to predict the following about a given pediatric appendicitis patient:
             1. Diagnosis: "appendicitis" or "no appendicitis"
             2. Management: "conservative" or "surgical"
-            3. Severity: "complicated" or "uncomplicated"
-            4. Length of Stay: a numeric prediction of the length of stay in days, along with a 80% confidence prediction interval (lower and upper bound)
+            3. Length of Stay: a numeric prediction of the length of stay in days, along with a 80% confidence prediction interval (lower and upper bound)
 
             IMPORTANT INSTRUCTIONS:
             1. Always prioritize information from the provided knowledge base and that can be obtained from the tools provided to you.
