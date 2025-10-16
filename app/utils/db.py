@@ -1,12 +1,11 @@
 import os
 import traceback
 from contextlib import contextmanager
-from typing import Any, ContextManager, Generator, Literal
+from typing import Generator, Literal
 
-import mysql.connector
 from dotenv import find_dotenv, load_dotenv
-from fastapi import HTTPException, status
-from mysql.connector import MySQLConnection, pooling
+from fastapi import Depends, HTTPException, status
+from mysql.connector import pooling
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import BreastCancerPatient
@@ -113,6 +112,20 @@ def get_user_by_id(cursor: MySQLCursorDict, user_id: int) -> User | None:
         WHERE id = %s
     """
     params = (user_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return User(**row)
+
+
+def get_user_by_email(cursor: MySQLCursorDict, email: str) -> User | None:
+    operation = """
+        SELECT *
+        FROM users
+        WHERE email = %s
+    """
+    params = (email,)
     cursor.execute(operation, params)
     row = cursor.fetchone()
     if row is None:
@@ -321,7 +334,7 @@ def insert_pending_email(
         # Otherwise, the existing user account has the same discipline.
         # Are they already linked to a patient record?
         if row["condition"] == Condition.BREAST_CANCER.value:
-            operation == """
+            operation = """
                 SELECT id
                 FROM breast_cancer_patients
                 WHERE user_id = %s
@@ -336,7 +349,7 @@ def insert_pending_email(
                 )
 
         elif row["condition"] == Condition.PEDIATRIC_APPENDICITIS.value:
-            operation == """
+            operation = """
                 SELECT id
                 FROM pediatric_appendicitis_patients
                 WHERE user_id = %s
@@ -357,9 +370,4 @@ def insert_pending_email(
         WHERE id = %s
     """
     params = (email, target_patient_id)
-    cursor.execute(operation, params)
-    cursor.execute(operation, params)
-    cursor.execute(operation, params)
-    cursor.execute(operation, params)
-    cursor.execute(operation, params)
     cursor.execute(operation, params)

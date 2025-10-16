@@ -1,16 +1,19 @@
-import traceback
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from mysql.connector import MySQLConnection
+from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import AssistantSlug
+from app.models.user_models import User
 from app.utils.assistants.access import has_access_to_assistant
 from app.utils.assistants.mapping import assistant_mapping
-from app.utils.db import get_conversation_by_id, get_db_cursor, get_user_by_id
-from app.utils.jwt import all_registered_users, require_access
+from app.utils.db import get_db_cursor
+from app.utils.dependencies import (
+    all_registered_users,
+    get_current_user,
+    require_access,
+    validate_conversation_id,
+)
 
 router = APIRouter(
     prefix="/chat",
@@ -21,6 +24,7 @@ router = APIRouter(
             "description": "Error with provided access token",
         },
     },
+    dependencies=[Security(require_access(all_registered_users()))],
 )
 
 
@@ -58,23 +62,12 @@ def _insert_message(
 def chat(
     request: ChatRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(all_registered_users())),
+    current_user: User = Depends(get_current_user),
 ):
 
-    conversation = get_conversation_by_id(cursor, request.conversation_id)
-
-    # User provided a conversation ID but it doesn't exist
-    if request.conversation_id and not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation with ID {request.conversation_id} not found",
-        )
-    # User provided a conversation ID but the conversation doesn't belong to them
-    elif request.conversation_id and conversation.user_id != current_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not authorized to access conversation {request.conversation_id}",
-        )
+    conversation = validate_conversation_id(
+        request.conversation_id, cursor, current_user
+    )
 
     assistant = assistant_mapping[conversation.assistant](conversation)
     assistant_reply = assistant.invoke(request.user_message)
@@ -101,12 +94,13 @@ def chat(
 def get_chat_suggestions(
     assistant: AssistantSlug = Query(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(all_registered_users())),
+    current_user: User = Depends(get_current_user),
 ):
 
     # Verify access to the requested assistant
-    user = get_user_by_id(cursor, current_user_id)
-    if not has_access_to_assistant(user.role, user.condition, assistant):
+    if not has_access_to_assistant(
+        current_user.role, current_user.condition, assistant
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to chat with the requested assistant",
@@ -123,7 +117,7 @@ def get_chat_suggestions(
             ORDER BY p.updated_at DESC
             LIMIT 1;
         """
-        params = (current_user_id,)
+        params = (current_user.id,)
         cursor.execute(operation, params)
         row = cursor.fetchone()
         if row is not None:
@@ -143,7 +137,7 @@ def get_chat_suggestions(
             ORDER BY p.updated_at DESC
             LIMIT 1;
         """
-        params = (current_user_id,)
+        params = (current_user.id,)
         cursor.execute(operation, params)
         row = cursor.fetchone()
         if row is not None:

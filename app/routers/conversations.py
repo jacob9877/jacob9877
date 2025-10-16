@@ -1,28 +1,28 @@
-import traceback
-
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from mysql.connector import MySQLConnection
+from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import Message
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import (
     AssistantSlug,
+    Conversation,
     ConversationSummary,
     GetConversationResponse,
     StartConversationRequest,
     StartConversationResponse,
 )
+from app.models.user_models import User
 from app.utils.assistants.access import has_access_to_assistant
 from app.utils.assistants.mapping import assistant_mapping
-from app.utils.db import (
-    get_breast_cancer_patient_by_id,
-    get_conversation_by_id,
-    get_db_cursor,
-    get_pediatric_appendicitis_patient_by_id,
-    get_user_by_id,
+from app.utils.db import get_db_cursor
+from app.utils.dependencies import (
+    all_registered_users,
+    get_current_user,
+    require_access,
+    validate_breast_cancer_patient_id,
+    validate_conversation_id,
+    validate_pediatric_appendicitis_patient_id,
 )
-from app.utils.jwt import all_registered_users, require_access
 
 router = APIRouter(
     prefix="/conversations",
@@ -33,6 +33,7 @@ router = APIRouter(
             "description": "Error with provided access token",
         },
     },
+    dependencies=[Security(require_access(all_registered_users()))],
 )
 
 
@@ -57,12 +58,13 @@ router = APIRouter(
 def start_conversation(
     request: StartConversationRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(all_registered_users())),
+    current_user: User = Depends(get_current_user),
 ):
 
     # Verify access to the requested assistant
-    user = get_user_by_id(cursor, current_user_id)
-    if not has_access_to_assistant(user.role, user.condition, request.assistant):
+    if not has_access_to_assistant(
+        current_user.role, current_user.condition, request.assistant
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to chat with the requested assistant",
@@ -71,24 +73,10 @@ def start_conversation(
     # If patient_id is provided, ensure the user has access to this patient
     if request.patient_id is not None:
         if request.assistant == "clinician-breast-cancer":
-            patient = get_breast_cancer_patient_by_id(cursor, request.patient_id)
+            validate_breast_cancer_patient_id(request.patient_id, cursor, current_user)
         else:
-            patient = get_pediatric_appendicitis_patient_by_id(
-                cursor, request.patient_id
-            )
-
-        if patient is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Patient with ID {request.patient_id} not found",
-            )
-
-        print(patient)
-
-        if patient.clinician_user_id != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Not authorized to chat about patient with ID {request.patient_id}",
+            validate_pediatric_appendicitis_patient_id(
+                request.patient_id, cursor, current_user
             )
 
     assistant_class = assistant_mapping[request.assistant]
@@ -99,7 +87,7 @@ def start_conversation(
         VALUES (%s, %s, %s, %s)
     """
     params = (
-        current_user_id,
+        current_user.id,
         request.patient_id,
         conversation_title,
         request.assistant,
@@ -150,26 +138,10 @@ def _get_conversation_history(
     },
 )
 def get_conversation(
-    conversation_id: int = Path(
-        description="ID of the conversation to return", example=1
-    ),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(all_registered_users())),
+    conversation: Conversation = Depends(validate_conversation_id),
 ):
-
-    conversation = get_conversation_by_id(cursor, conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation with ID {conversation_id} not found",
-        )
-    if conversation.user_id != current_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not authorized to access conversation with ID {conversation_id}",
-        )
-
-    messages = _get_conversation_history(cursor, conversation_id)
+    messages = _get_conversation_history(cursor, conversation.id)
 
     return ResponseModel[GetConversationResponse](
         data=GetConversationResponse(
@@ -192,11 +164,11 @@ def get_user_conversations(
         default=None, description="Type of assistant to filter conversations by"
     ),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(all_registered_users())),
+    current_user: User = Depends(get_current_user),
 ):
 
     where_clause = "user_id=%s"
-    params = (current_user_id,)
+    params = (current_user.id,)
     if assistant:
         where_clause += " AND assistant=%s"
         params = params + (assistant,)

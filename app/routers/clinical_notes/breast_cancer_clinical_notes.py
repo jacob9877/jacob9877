@@ -1,40 +1,37 @@
-import traceback
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from mysql.connector import MySQLConnection
+from fastapi import APIRouter, Depends, HTTPException, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.clinical_notes_models import ClinicalNote, UpsertClinicalNoteRequest
 from app.models.common_models import ResponseModel
-from app.models.user_models import Condition
-from app.utils.db import (
-    get_breast_cancer_clinical_note_by_id,
-    get_breast_cancer_patient_by_id,
-    get_db_cursor,
+from app.utils.db import get_breast_cancer_clinical_note_by_id, get_db_cursor
+from app.utils.dependencies import (
+    clinicians_only,
+    require_access,
+    validate_breast_cancer_patient_id,
 )
-from app.utils.jwt import clinicians_only, require_access
 
-
-def validate_patient_id(
-    patient_id: int,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(
-        require_access(clinicians_only())
-    ),  # Keep the auth here to not call it twice
-) -> None:
-
-    patient = get_breast_cancer_patient_by_id(cursor, patient_id)
-
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found"
-        )
-
-    if patient.clinician_user_id != current_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this patient's clinical notes",
-        )
+router = APIRouter(
+    prefix="/breast-cancer-patients/{patient_id}/clinical-notes",
+    tags=["Breast Cancer Clinical Notes"],
+    dependencies=[
+        Security(require_access(clinicians_only())),
+        Depends(validate_breast_cancer_patient_id),
+    ],
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Clinical note with requested note id does not belong to patient with requested patient id",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to access the requested resource",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Requested resource doesn't exist",
+        },
+    },
+)
 
 
 def validate_note_id(
@@ -54,28 +51,6 @@ def validate_note_id(
         )
 
     return clinical_note
-
-
-router = APIRouter(
-    prefix="/{patient_id}/clinical-notes",
-    dependencies=[
-        Depends(validate_patient_id),
-    ],
-    responses={
-        status.HTTP_400_BAD_REQUEST: {
-            "model": ResponseModel[None],
-            "description": "Clinical note with requested note id does not belong to patient with requested patient id",
-        },
-        status.HTTP_403_FORBIDDEN: {
-            "model": ResponseModel[None],
-            "description": "Not authorized to access the requested resource",
-        },
-        status.HTTP_404_NOT_FOUND: {
-            "model": ResponseModel[None],
-            "description": "Requested resource doesn't exist",
-        },
-    },
-)
 
 
 @router.get(

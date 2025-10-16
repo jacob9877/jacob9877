@@ -1,10 +1,8 @@
 import os
-import traceback
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from mysql.connector import MySQLConnection
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.common_models import ResponseModel
@@ -21,7 +19,7 @@ from app.models.pediatric_appendicitis_models import (
     S3Uri,
     UpsertPediatricAppendicitisPatientRequest,
 )
-from app.routers.clinical_notes import pediatric_appendicitis_clinical_notes
+from app.models.user_models import User
 from app.utils.aws import (
     bulk_send_message_to_sqs,
     create_presigned_post_for_image,
@@ -29,12 +27,13 @@ from app.utils.aws import (
     get_predictions,
     s3_file_exists,
 )
-from app.utils.db import (
-    get_db_cursor,
-    get_pediatric_appendicitis_patient_by_id,
-    insert_pending_email,
+from app.utils.db import get_db_cursor, insert_pending_email
+from app.utils.dependencies import (
+    clinicians_only,
+    get_current_user,
+    require_access,
+    validate_pediatric_appendicitis_patient_id,
 )
-from app.utils.jwt import clinicians_only, require_access
 from app.utils.pagination import decode_cursor, encode_cursor
 
 router = APIRouter(
@@ -46,9 +45,8 @@ router = APIRouter(
             "description": "Error with provided access token",
         },
     },
+    dependencies=[Security(require_access(clinicians_only()))],
 )
-
-router.include_router(pediatric_appendicitis_clinical_notes.router)
 
 IMAGES_BUCKET = "pediatric-appendicitis-images"
 SAGEMAKER_ENDPOINT_NAME = "pediatric-appendicitis"
@@ -71,15 +69,14 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
 def create_presigned_uploads(
     request: CreateImagesRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
+    current_user: User = Depends(get_current_user),
 ):
-
     presigned_uploads: list[PresignedUpload] = []
     for file_type in request.file_types:
         upload_id = str(uuid.uuid4())
         presigned_post_url = create_presigned_post_for_image(
             bucket=IMAGES_BUCKET,
-            key=build_s3_image_key(current_user_id, upload_id, file_type),
+            key=build_s3_image_key(current_user.id, upload_id, file_type),
             file_type=file_type,
             max_size_in_bytes=5 * 1024 * 1024,  # 5 MB limit
             expires_in_sec=300,  # URL valid for 5 minutes
@@ -96,7 +93,7 @@ def create_presigned_uploads(
             INSERT INTO pediatric_appendicitis_images (upload_id, user_id, file_type)
             VALUES (%s, %s, %s)
         """
-        params = (upload_id, current_user_id, file_type)
+        params = (upload_id, current_user.id, file_type)
         cursor.execute(operation, params)
 
     return presigned_uploads
@@ -181,11 +178,11 @@ def _insert_patient(
 def add_patient(
     add_patient_request: UpsertPediatricAppendicitisPatientRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
+    current_user: User = Depends(get_current_user),
 ):
 
     image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, upload_id, current_user_id)
+        _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
         for upload_id in add_patient_request.image_upload_ids
     ]
 
@@ -197,7 +194,7 @@ def add_patient(
     predictions_validated = PediatricAppendicitisPredictions(**predictions)
     new_patient = _insert_patient(
         cursor,
-        current_user_id,
+        current_user.id,
         add_patient_request.features,
         predictions_validated,
     )
@@ -213,7 +210,7 @@ def add_patient(
         params = (
             new_patient.id,
             *add_patient_request.image_upload_ids,
-            current_user_id,
+            current_user.id,
         )
         cursor.execute(operation, params)
 
@@ -276,22 +273,11 @@ def add_patient(
 def get_patient(
     patient_id: int = Path(..., description="ID of the patient to get"),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
+    patient: PediatricAppendicitisPatient = Depends(
+        validate_pediatric_appendicitis_patient_id
+    ),
+    current_user: User = Depends(get_current_user),
 ):
-
-    patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
-
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pediatric appendicitis patient with ID {patient_id} not found",
-        )
-
-    if patient.clinician_user_id != current_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not authorized to access this patient",
-        )
 
     # Fetch any images associated with the patient
     operation = """
@@ -306,7 +292,7 @@ def get_patient(
     # Build upload_id, pre-signed url pairs for each image
     images: list[ImageResponse] = []
     for row in rows:
-        s3_key = build_s3_image_key(current_user_id, row["upload_id"], row["file_type"])
+        s3_key = build_s3_image_key(current_user.id, row["upload_id"], row["file_type"])
         presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
         images.append(ImageResponse(upload_id=row["upload_id"], url=presigned_url))
 
@@ -351,7 +337,7 @@ def get_pediatric_appendicitis_patients_paginated(
         description="Max number of patients to return (1–100)",
     ),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
+    current_user: User = Depends(get_current_user),
 ):
 
     # Order is (updated_at DESC, id DESC).
@@ -363,15 +349,15 @@ def get_pediatric_appendicitis_patients_paginated(
         WHERE clinician_user_id = %s
     """
 
-    params = [current_user_id]
+    params = [current_user.id]
 
     if cursor_token:
         try:
             last_timestamp, last_id = decode_cursor(cursor_token)
-        except:
+        except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
-            )
+            ) from e
         operation += """
             AND (
                 updated_at < %s
@@ -394,7 +380,7 @@ def get_pediatric_appendicitis_patients_paginated(
         FROM pediatric_appendicitis_patients
         WHERE clinician_user_id = %s
     """
-    params = (current_user_id,)
+    params = (current_user.id,)
     cursor.execute(operation, params)
     result = cursor.fetchone()
     total_count = result["count"]
@@ -440,27 +426,14 @@ def get_pediatric_appendicitis_patients_paginated(
             "description": "Patient with provided ID not found",
         },
     },
+    dependencies=[
+        Depends(validate_pediatric_appendicitis_patient_id),
+    ],
 )
 def delete_patient(
     patient_id: int,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
 ):
-
-    patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
-
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Patient with ID {patient_id} not found",
-        )
-
-    if patient.user_id != current_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this patient",
-        )
-
     # Delete the patient record
     operation = """
         DELETE FROM pediatric_appendicitis_patients
@@ -529,22 +502,8 @@ def update_patient(
     patient_id: int,
     update_patient_request: UpsertPediatricAppendicitisPatientRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
+    current_user: User = Depends(get_current_user),
 ):
-    patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
-
-    if patient is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Patient with ID {patient_id} not found",
-        )
-
-    if patient.user_id != current_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not authorized to access this patient",
-        )
-
     image_upload_ids = update_patient_request.image_upload_ids or []
 
     # If the user provided images
@@ -555,7 +514,7 @@ def update_patient(
             DELETE FROM pediatric_appendicitis_images
             WHERE patient_id=%s AND user_id=%s AND upload_id NOT IN ({placeholders})
         """
-        params = (patient_id, current_user_id, *image_upload_ids)
+        params = (patient_id, current_user.id, *image_upload_ids)
         cursor.execute(operation, params)
     # If the user provided no images
     else:
@@ -564,11 +523,11 @@ def update_patient(
             DELETE FROM pediatric_appendicitis_images
             WHERE patient_id=%s AND user_id=%s
         """
-        params = (patient_id, current_user_id)
+        params = (patient_id, current_user.id)
         cursor.execute(operation, params)
 
     image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, upload_id, current_user_id)
+        _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
         for upload_id in image_upload_ids
     ]
 
@@ -604,7 +563,7 @@ def update_patient(
         params = (
             new_patient.id,
             *image_upload_ids,
-            current_user_id,
+            current_user.id,
         )
         cursor.execute(operation, params)
 
@@ -649,7 +608,7 @@ def delete_patients(
         example="ids=1&ids=2&ids=3",
     ),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(clinicians_only())),
+    current_user: User = Depends(get_current_user),
 ):
 
     # Verify all IDs exist
@@ -672,7 +631,7 @@ def delete_patients(
             detail=f"Patient IDs not found: {missing_ids}",
         )
 
-    forbidden_ids = [row["id"] for row in rows if row["user_id"] != current_user_id]
+    forbidden_ids = [row["id"] for row in rows if row["user_id"] != current_user.id]
     if forbidden_ids:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

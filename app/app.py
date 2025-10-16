@@ -15,6 +15,10 @@ from app.routers import (
     pediatric_appendicitis_patients,
     users,
 )
+from app.routers.clinical_notes import (
+    breast_cancer_clinical_notes,
+    pediatric_appendicitis_clinical_notes,
+)
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -32,7 +36,7 @@ app = FastAPI(
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+async def http_exception_handler(_: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content=ResponseModel[None](detail=exc.detail).model_dump(),
@@ -40,7 +44,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 @app.exception_handler(Exception)
-async def exception_handler(request: Request, exc: Exception):
+async def exception_handler(_: Request, exc: Exception):
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=ResponseModel[None](detail=str(exc)).model_dump(),
@@ -51,7 +55,9 @@ async def exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(breast_cancer_patients.router)
+app.include_router(breast_cancer_clinical_notes.router)
 app.include_router(pediatric_appendicitis_patients.router)
+app.include_router(pediatric_appendicitis_clinical_notes.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
 

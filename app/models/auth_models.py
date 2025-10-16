@@ -2,7 +2,7 @@ from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.user_models import RoleAndCondition
+from app.models.user_models import Condition, Role, RoleAndCondition
 
 
 class TokenType(str, Enum):
@@ -10,7 +10,7 @@ class TokenType(str, Enum):
     REFRESH = "refresh"
 
 
-class TokenPayload(BaseModel):
+class TokenPayload(RoleAndCondition):
     sub: str  # int user id as a string
     type: TokenType
     iat: int

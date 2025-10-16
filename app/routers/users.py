@@ -6,7 +6,6 @@ import bcrypt
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.common_models import ResponseModel

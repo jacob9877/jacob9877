@@ -1,8 +1,13 @@
-import traceback
-
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from mysql.connector import MySQLConnection
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    Security,
+    status,
+)
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.auth_models import (
@@ -13,15 +18,18 @@ from app.models.auth_models import (
     TokenType,
 )
 from app.models.common_models import ResponseModel
-from app.models.user_models import Condition
-from app.utils.db import get_db_cursor, get_user_by_id, user_exists
-from app.utils.jwt import (
+from app.models.user_models import User
+from app.utils.db import get_db_cursor, get_user_by_email, user_exists
+from app.utils.dependencies import (
     all_registered_users,
+    get_current_user,
+    require_access,
+)
+from app.utils.jwt import (
     clear_refresh_cookie,
     create_jwt,
     decode_and_validate_jwt,
     get_refresh_token_from_cookie,
-    require_access,
     set_refresh_cookie,
 )
 
@@ -52,32 +60,32 @@ def login(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
 
-    # Looks up user by email
-    operation = """
-        SELECT id, username, password_hash
-        FROM users
-        WHERE email = %s
-    """
-    params = (login_request.email,)
-    cursor.execute(operation, params)
-    user = cursor.fetchone()
+    user = get_user_by_email(cursor, login_request.email)
 
     # Checks if the user exists
-    if not user:
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     # Checks password
-    if not bcrypt.checkpw(
-        login_request.password.encode(), user["password_hash"].encode()
-    ):
+    if not bcrypt.checkpw(login_request.password.encode(), user.password_hash.encode()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password"
         )
 
-    access_token = create_jwt(user_id=user["id"], token_type=TokenType.ACCESS)
-    refresh_token = create_jwt(user_id=user["id"], token_type=TokenType.REFRESH)
+    access_token = create_jwt(
+        user_id=user.id,
+        role=user.role,
+        condition=user.condition,
+        token_type=TokenType.ACCESS,
+    )
+    refresh_token = create_jwt(
+        user_id=user.id,
+        role=user.role,
+        condition=user.condition,
+        token_type=TokenType.REFRESH,
+    )
     set_refresh_cookie(response, refresh_token)
 
     return ResponseModel[LoginResponse](
@@ -123,6 +131,8 @@ def refresh(
     # Issue a new access token; keep the same refresh token
     access_token = create_jwt(
         user_id=user_id,
+        role=payload.role,
+        condition=payload.condition,
         token_type=TokenType.ACCESS,
     )
     set_refresh_cookie(response, refresh_token)
@@ -158,17 +168,11 @@ def logout(response: Response):
             "description": "Error with provided access token",
         },
     },
+    dependencies=[Security(require_access(all_registered_users()))],
 )
 def me(
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
-    current_user_id: int = Depends(require_access(all_registered_users())),
+    current_user: User = Depends(get_current_user),
 ):
-
-    current_user = get_user_by_id(cursor, current_user_id)
-    if current_user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
-        )
 
     return ResponseModel[MeResponse](
         data=MeResponse(
