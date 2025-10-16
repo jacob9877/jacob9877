@@ -3,12 +3,15 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
-class ClinicalNote(BaseModel):
+class ClinicalNoteBase(BaseModel):
     id: int
-    patient_id: int
     content: str
     created_at: datetime
     updated_at: datetime
+
+
+class ClinicalNote(ClinicalNoteBase):
+    patient_id: int
 
 
 class UpsertClinicalNoteRequest(BaseModel):

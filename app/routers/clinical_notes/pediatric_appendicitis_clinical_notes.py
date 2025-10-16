@@ -18,9 +18,9 @@ router = APIRouter(
         Depends(validate_pediatric_appendicitis_patient_id),
     ],
     responses={
-        status.HTTP_400_BAD_REQUEST: {
+        status.HTTP_401_UNAUTHORIZED: {
             "model": ResponseModel[None],
-            "description": "Clinical note with requested note id does not belong to patient with requested patient id",
+            "description": "Error with provided access token",
         },
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
@@ -90,6 +90,12 @@ def get_clinical_notes(
     response_model=ResponseModel[ClinicalNote],
     response_description="The requested clinical note",
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Clinical note with requested note id does not belong to patient with requested patient id",
+        },
+    },
 )
 def get_clinical_note(
     clinical_note: ClinicalNote = Depends(validate_note_id),
@@ -137,6 +143,12 @@ def add_clinical_note(
     response_model=ResponseModel[ClinicalNote],
     response_description="The updated clinical note",
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Clinical note with requested note id does not belong to patient with requested patient id",
+        },
+    },
 )
 def update_clinical_note(
     note_id: int,
@@ -168,6 +180,12 @@ def update_clinical_note(
     response_model=ResponseModel[None],
     response_description="Nothing really",
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ResponseModel[None],
+            "description": "Clinical note with requested note id does not belong to patient with requested patient id",
+        },
+    },
 )
 def delete_clinical_note(
     note_id: int,
