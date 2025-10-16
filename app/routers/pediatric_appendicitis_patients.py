@@ -539,7 +539,7 @@ def update_patient(
             detail=f"Patient with ID {patient_id} not found",
         )
 
-    if patient.user_id != current_user_id:
+    if patient.clinician_user_id != current_user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access this patient",
