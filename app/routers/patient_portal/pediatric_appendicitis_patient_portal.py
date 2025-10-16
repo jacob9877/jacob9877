@@ -45,7 +45,7 @@ def get_patient_info_for_user(
 
     operation = """
         SELECT *
-        FROM pediatric_appendicitis_patient
+        FROM pediatric_appendicitis_patients
         WHERE user_id = %s
     """
     params = (current_user.id,)
