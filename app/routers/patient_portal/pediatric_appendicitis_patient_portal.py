@@ -87,7 +87,33 @@ def get_current_patient_info(
         **features,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
-        clinician=ClinicianInfo(email=row["email"])
+        clinician=ClinicianInfo(email=row["email"]),
+        # Only include predictions if approved by clinician
+        diagnosis=(
+            patient.diagnosis
+            if patient.diagnosis_approval_status == "approved"
+            else None
+        ),
+        management=(
+            patient.management
+            if patient.management_approval_status == "approved"
+            else None
+        ),
+        length_of_stay_pred=(
+            patient.length_of_stay_pred
+            if patient.length_of_stay_approval_status == "approved"
+            else None
+        ),
+        length_of_stay_pi_lower=(
+            patient.length_of_stay_pi_lower
+            if patient.length_of_stay_approval_status == "approved"
+            else None
+        ),
+        length_of_stay_pi_upper=(
+            patient.length_of_stay_pi_upper
+            if patient.length_of_stay_approval_status == "approved"
+            else None
+        ),
     )
     return ResponseModel[GetPediatricAppendicitisPatientPortalResponse](
         data=response, detail="Patient info retrieved successfully"

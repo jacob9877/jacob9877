@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.common_models import PaginatedResults
+from app.models.common_models import ApprovalStatus, PaginatedResults
 
 
 class BreastCancerPatientFeatures(BaseModel):
@@ -27,8 +27,12 @@ class AddBreastCancerPatientRequest(BreastCancerPatientFeatures):
     email: EmailStr | None = None
 
 
+class BreastCancerApprovals(BaseModel):
+    diagnosis_approval_status: ApprovalStatus | None = None
+
+
 # Should be identical to the schema of the database
-class BreastCancerPatient(BreastCancerPatientFeatures):
+class BreastCancerPatient(BreastCancerPatientFeatures, BreastCancerApprovals):
     id: int = Field(..., description="ID of the breast cancer patient", example=1)
     clinician_user_id: int = Field(
         ...,

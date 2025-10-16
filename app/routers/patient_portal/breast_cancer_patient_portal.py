@@ -82,7 +82,13 @@ def get_current_patient_info(
         **features,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
-        clinician=ClinicianInfo(email=row["email"])
+        clinician=ClinicianInfo(email=row["email"]),
+        # Only include predictions if approved by clinician
+        diagnosis=(
+            patient.diagnosis
+            if patient.diagnosis_approval_status == "approved"
+            else None
+        )
     )
     return ResponseModel[GetBreastCancerPatientPortalResponse](
         data=response, detail="Patient info retrieved successfully"

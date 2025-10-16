@@ -15,6 +15,10 @@ from app.routers import (
     pediatric_appendicitis_patients,
     users,
 )
+from app.routers.approvals import (
+    breast_cancer_approvals,
+    pediatric_appendicitis_approvals,
+)
 from app.routers.clinical_notes import (
     breast_cancer_clinical_notes,
     pediatric_appendicitis_clinical_notes,
@@ -66,6 +70,8 @@ app.include_router(conversations.router)
 app.include_router(chat.router)
 app.include_router(breast_cancer_patient_portal.router)
 app.include_router(pediatric_appendicitis_patient_portal.router)
+app.include_router(breast_cancer_approvals.router)
+app.include_router(pediatric_appendicitis_approvals.router)
 
 app.add_middleware(
     CORSMiddleware,

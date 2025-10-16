@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models.common_models import PaginatedResults
+from app.models.common_models import ApprovalStatus, PaginatedResults
 
 ACCEPTED_IMAGE_TYPES = Literal["jpg", "jpeg", "png", "bmp"]
 MIME_TYPE_MAPPINGS = {
@@ -136,6 +136,9 @@ class PediatricAppendicitisPatient(
     clinician_user_id: int
     user_id: int | None = None
     pending_email: str | None = None
+    diagnosis_approval_status: ApprovalStatus | None = None
+    management_approval_status: ApprovalStatus | None = None
+    length_of_stay_approval_status: ApprovalStatus | None = None
     created_at: datetime
     updated_at: datetime
 

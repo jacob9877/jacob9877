@@ -27,7 +27,11 @@ from app.utils.aws import (
     get_predictions,
     s3_file_exists,
 )
-from app.utils.db import get_db_cursor, insert_pending_email
+from app.utils.db import (
+    get_db_cursor,
+    get_pediatric_appendicitis_patient_by_id,
+    insert_pending_email,
+)
 from app.utils.dependencies import (
     clinicians_only,
     get_current_user,
@@ -155,16 +159,9 @@ def _insert_patient(
     cursor.execute(operation, params)
     patient_id = cursor.lastrowid
 
-    operation = """
-        SELECT *
-        FROM pediatric_appendicitis_patients
-        WHERE id = %s
-    """
-    params = (patient_id,)
-    cursor.execute(operation, params)
-    row = cursor.fetchone()
+    patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
-    return PediatricAppendicitisPatient(**row)
+    return patient
 
 
 @router.post(
@@ -468,16 +465,9 @@ def _update_patient(
     )
     cursor.execute(operation, params)
 
-    operation = """
-        SELECT *
-        FROM pediatric_appendicitis_patients
-        WHERE id = %s
-    """
-    params = (patient_id,)
-    cursor.execute(operation, params)
-    row = cursor.fetchone()
+    updated_patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
-    return PediatricAppendicitisPatient(**row)
+    return updated_patient
 
 
 @router.put(

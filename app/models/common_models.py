@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -13,3 +13,6 @@ class ResponseModel(BaseModel, Generic[T]):
 class PaginatedResults(BaseModel):
     next_cursor: str | None = Field(default=None, description="...")
     total_count: int
+
+
+ApprovalStatus = Literal["approved", "rejected"]
