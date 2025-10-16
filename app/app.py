@@ -19,7 +19,10 @@ from app.routers.clinical_notes import (
     breast_cancer_clinical_notes,
     pediatric_appendicitis_clinical_notes,
 )
-from app.routers.patient_portal import breast_cancer_patient_portal
+from app.routers.patient_portal import (
+    breast_cancer_patient_portal,
+    pediatric_appendicitis_patient_portal,
+)
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -62,6 +65,7 @@ app.include_router(pediatric_appendicitis_clinical_notes.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
 app.include_router(breast_cancer_patient_portal.router)
+app.include_router(pediatric_appendicitis_patient_portal.router)
 
 app.add_middleware(
     CORSMiddleware,
