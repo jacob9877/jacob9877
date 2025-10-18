@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ClinicalNoteBase(BaseModel):
     id: int
-    content: str
+    content: str = Field(..., example="Patient is very cool.")
     created_at: datetime
     updated_at: datetime
 
@@ -15,4 +15,4 @@ class ClinicalNote(ClinicalNoteBase):
 
 
 class UpsertClinicalNoteRequest(BaseModel):
-    content: str
+    content: str = Field(..., example="Patient is very cool.")

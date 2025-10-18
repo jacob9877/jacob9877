@@ -10,7 +10,9 @@ from app.models.pediatric_appendicitis_patient_models import (
 
 
 class ClinicianInfo(BaseModel):
-    email: str
+    first_name: str = Field(..., example="John")
+    last_name: str = Field(..., example="Doe")
+    email: str = Field(..., example="user@example.com")
 
 
 class GetPatientPortalResponseBase(BaseModel):

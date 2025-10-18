@@ -57,6 +57,6 @@ class User(RoleAndCondition):
 
 
 class PatientUserInfo(BaseModel):
-    first_name: str
-    last_name: str
-    email: str
+    first_name: str = Field(..., example="John")
+    last_name: str = Field(..., example="Doe")
+    email: str = Field(..., example="user@example.com")

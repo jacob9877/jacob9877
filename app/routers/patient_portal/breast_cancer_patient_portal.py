@@ -67,7 +67,7 @@ def get_current_patient_info(
     patient: BreastCancerPatient = Depends(get_patient_info_for_user),
 ):
     operation = """
-        SELECT email
+        SELECT first_name, last_name, email
         FROM users
         WHERE id = %s
     """
@@ -82,7 +82,7 @@ def get_current_patient_info(
         **features,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
-        clinician=ClinicianInfo(email=row["email"]),
+        clinician=ClinicianInfo(**row),
         # Only include predictions if approved by clinician
         diagnosis=(
             patient.diagnosis

@@ -136,8 +136,8 @@ class PediatricAppendicitisPatient(
     id: int
     clinician_user_id: int
     user_id: int | None = None
-    pending_email: str | None = None
-    name: str | None = None
+    pending_email: str | None = Field(default=None, example="user@example.com")
+    name: str | None = Field(default=None, example="John Doe")
     diagnosis_approval_status: ApprovalStatus | None = None
     management_approval_status: ApprovalStatus | None = None
     length_of_stay_approval_status: ApprovalStatus | None = None
@@ -165,8 +165,8 @@ class GetPediatricAppendicitisPatientResponseWithImages(
 class UpsertPediatricAppendicitisPatientRequest(BaseModel):
     features: PediatricAppendicitisPatientFeatures
     image_upload_ids: list[str] | None = []
-    name: str | None = None
-    email: EmailStr | None = None
+    name: str | None = Field(default=None, example="John Doe")
+    email: EmailStr | None = Field(default=None, example="user@example.com")
 
 
 class S3Uri(BaseModel):
