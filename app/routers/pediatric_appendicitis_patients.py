@@ -138,11 +138,13 @@ def _get_s3_uri_for_upload_id(
 def _insert_patient(
     cursor: MySQLCursorDict,
     clinician_user_id: int,
+    name: str | None,
     features: PediatricAppendicitisPatientFeatures,
     predictions: PediatricAppendicitisPredictions,
 ) -> PediatricAppendicitisPatient:
     column_names = [
         "clinician_user_id",
+        "name",
         *FEATURE_NAMES,
         *list(PediatricAppendicitisPredictions.model_fields.keys()),
     ]
@@ -152,7 +154,7 @@ def _insert_patient(
         VALUES ({placeholders})
     """
     params = tuple(
-        [clinician_user_id]
+        [clinician_user_id, name]
         + [getattr(features, feature_name) for feature_name in FEATURE_NAMES]
         + list(predictions.model_dump().values())
     )
@@ -192,6 +194,7 @@ def add_patient(
     new_patient = _insert_patient(
         cursor,
         current_user.id,
+        add_patient_request.name,
         add_patient_request.features,
         predictions_validated,
     )
@@ -445,10 +448,12 @@ def delete_patient(
 def _update_patient(
     cursor: MySQLCursorDict,
     patient_id: int,
+    name: str | None,
     features: PediatricAppendicitisPatientFeatures,
     predictions: PediatricAppendicitisPredictions,
 ) -> PediatricAppendicitisPatient:
     column_names = [
+        "name",
         *FEATURE_NAMES,
         *list(PediatricAppendicitisPredictions.model_fields.keys()),
     ]
@@ -459,7 +464,8 @@ def _update_patient(
         WHERE id=%s
     """
     params = (
-        tuple(getattr(features, name) for name in FEATURE_NAMES)
+        (name,)
+        + tuple(getattr(features, name) for name in FEATURE_NAMES)
         + tuple(predictions.model_dump().values())
         + (patient_id,)
     )
@@ -530,6 +536,7 @@ def update_patient(
     new_patient = _update_patient(
         cursor,
         patient_id,
+        update_patient_request.name,
         update_patient_request.features,
         predictions_validated,
     )

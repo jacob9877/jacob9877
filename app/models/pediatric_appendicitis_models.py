@@ -136,6 +136,7 @@ class PediatricAppendicitisPatient(
     clinician_user_id: int
     user_id: int | None = None
     pending_email: str | None = None
+    name: str | None = None
     diagnosis_approval_status: ApprovalStatus | None = None
     management_approval_status: ApprovalStatus | None = None
     length_of_stay_approval_status: ApprovalStatus | None = None
@@ -157,6 +158,7 @@ class PediatricAppendicitisPatientWithImages(PediatricAppendicitisPatient):
 class UpsertPediatricAppendicitisPatientRequest(BaseModel):
     features: PediatricAppendicitisPatientFeatures
     image_upload_ids: list[str] | None = []
+    name: str | None = None
     email: EmailStr | None = None
 
 
