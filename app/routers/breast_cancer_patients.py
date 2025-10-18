@@ -23,6 +23,7 @@ from app.models.breast_cancer_patient_models import (
     AddBreastCancerPatientsRequest,
     BreastCancerPatient,
     BreastCancerPatientFeatures,
+    GetBreastCancerPatientResponse,
     PaginatedBreastCancerPatients,
     UpdateBreastCancerPatientRequest,
 )
@@ -87,7 +88,7 @@ def _add_patients(
     cursor: MySQLCursorDict,
     clinician_user_id: int,
     add_patients_request: AddBreastCancerPatientsRequest,
-) -> list[BreastCancerPatient]:
+) -> list[GetBreastCancerPatientResponse]:
     instances = [
         list(patient.model_dump().values()) for patient in add_patients_request.patients
     ]
@@ -107,23 +108,34 @@ def _add_patients(
 
     placeholders = ",".join(["%s"] * len(inserted_ids))
     operation = f"""
-        SELECT * 
-        FROM breast_cancer_patients
-        WHERE id IN ({placeholders})
-        ORDER BY FIELD(id, {placeholders})
+        SELECT
+        p.*,
+        CASE
+            WHEN p.user_id IS NULL THEN NULL
+            ELSE CAST(JSON_OBJECT(
+            'first_name', u.first_name,
+            'last_name', u.last_name,
+            'email',    u.email
+            ) AS JSON)
+        END AS patient_user_info
+        FROM breast_cancer_patients AS p
+        LEFT JOIN users AS u
+        ON u.id = p.user_id
+        WHERE p.id IN ({placeholders})
+        ORDER BY FIELD(p.id, {placeholders})
     """
-    params = tuple(inserted_ids) * 2
+    params = tuple(inserted_ids) + tuple(inserted_ids)
     cursor.execute(operation, params)
     rows = cursor.fetchall()
 
-    return [BreastCancerPatient(**row) for row in rows]
+    return [GetBreastCancerPatientResponse(**row) for row in rows]
 
 
 @router.post(
     "/single",
     summary="Add breast cancer patient",
     description="Add a breast cancer patient with the patient's email.",
-    response_model=ResponseModel[BreastCancerPatient],
+    response_model=ResponseModel[GetBreastCancerPatientResponse],
     response_description="Returns the newly created breast cancer patient",
     status_code=status.HTTP_201_CREATED,
     responses={
@@ -168,15 +180,16 @@ def add_patient(
     )
     cursor.execute(operation, params)
     new_patient_id = cursor.lastrowid
-    inserted_patient = get_breast_cancer_patient_by_id(cursor, new_patient_id)
 
     if add_patient_request.email:
         insert_pending_email(
             cursor,
             add_patient_request.email,
-            inserted_patient.id,
+            new_patient_id,
             "breast_cancer_patients",
         )
+
+    inserted_patient = get_breast_cancer_patient_by_id(cursor, new_patient_id)
 
     # Send the new patient info to SQS for explanation processing
     messages = [
@@ -185,7 +198,7 @@ def add_patient(
     ]
     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    return ResponseModel[BreastCancerPatient](
+    return ResponseModel[GetBreastCancerPatientResponse](
         data=inserted_patient, detail="Patients added successfully"
     )
 
@@ -194,7 +207,7 @@ def add_patient(
     "",
     summary="Add multiple breast cancer patients",
     description="Add multiple breast cancer patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
-    response_model=ResponseModel[list[BreastCancerPatient]],
+    response_model=ResponseModel[list[GetBreastCancerPatientResponse]],
     response_description="Returns the newly created breast cancer patients",
     status_code=status.HTTP_201_CREATED,
 )
@@ -222,7 +235,7 @@ def add_patients_json(
     "/csv",
     summary="Add multiple breast cancer patients via CSV upload",
     description="Add multiple breast cancer patients with their features and user ID",
-    response_model=ResponseModel[list[BreastCancerPatient]],
+    response_model=ResponseModel[list[GetBreastCancerPatientResponse]],
     response_description="Returns the newly created breast cancer patients",
     status_code=status.HTTP_201_CREATED,
     responses={
@@ -255,7 +268,7 @@ def add_patients_csv(
     ]
     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    return ResponseModel[list[BreastCancerPatient]](
+    return ResponseModel[list[GetBreastCancerPatientResponse]](
         data=inserted_patients, detail="Patients added successfully"
     )
 
@@ -263,7 +276,7 @@ def add_patients_csv(
 @router.get(
     "/{patient_id}",
     summary="Get a patient by ID",
-    response_model=ResponseModel[BreastCancerPatient],
+    response_model=ResponseModel[GetBreastCancerPatientResponse],
     response_description="Returns the breast cancer patient with the provided ID",
     status_code=status.HTTP_200_OK,
     responses={
@@ -278,9 +291,11 @@ def add_patients_csv(
     },
 )
 def get_patient(
-    patient: BreastCancerPatient = Depends(validate_breast_cancer_patient_id),
+    patient: GetBreastCancerPatientResponse = Depends(
+        validate_breast_cancer_patient_id
+    ),
 ):
-    return ResponseModel[BreastCancerPatient](
+    return ResponseModel[GetBreastCancerPatientResponse](
         data=patient, detail="Patient fetched successfully"
     )
 
@@ -322,11 +337,21 @@ def get_breast_cancer_patients_paginated(
     # For "next page", fetch rows strictly "after" the cursor in that order:
     # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
     operation = """
-        SELECT *
-        FROM breast_cancer_patients
-        WHERE clinician_user_id = %s
+        SELECT
+            p.*,
+            CASE
+                WHEN p.user_id IS NULL THEN NULL
+                ELSE CAST(JSON_OBJECT(
+                    'first_name', u.first_name,
+                    'last_name',  u.last_name,
+                    'email',      u.email
+                ) AS JSON)
+            END AS patient_user_info
+        FROM breast_cancer_patients AS p
+        LEFT JOIN users AS u
+            ON u.id = p.user_id
+        WHERE p.clinician_user_id = %s
     """
-
     params = [current_user.id]
 
     if cursor_token:
@@ -345,7 +370,7 @@ def get_breast_cancer_patients_paginated(
         params.extend([last_timestamp, last_timestamp, last_id])
 
     # Apply ORDER BY and LIMIT + 1 (to see if there's another page)
-    operation += " ORDER BY updated_at DESC, id DESC LIMIT %s"
+    operation += " ORDER BY p.updated_at DESC, p.id DESC LIMIT %s"
     params.append(limit + 1)
 
     cursor.execute(operation, tuple(params))
@@ -353,10 +378,9 @@ def get_breast_cancer_patients_paginated(
 
     # Get the total count while we have the cursor
     operation = """
-        SELECT COUNT(*) 
-        AS count
-        FROM breast_cancer_patients
-        WHERE clinician_user_id = %s
+        SELECT COUNT(*) AS count
+        FROM breast_cancer_patients AS p
+        WHERE p.clinician_user_id = %s
     """
     params = (current_user.id,)
     cursor.execute(operation, params)
@@ -368,7 +392,7 @@ def get_breast_cancer_patients_paginated(
     if has_more:
         rows = rows[:limit]  # only return 'limit' items
 
-    patients = [BreastCancerPatient(**row) for row in rows]
+    patients = [GetBreastCancerPatientResponse(**row) for row in rows]
 
     next_cursor: str | None = None
     if has_more and rows:
@@ -395,7 +419,7 @@ def _update_and_repredict(
     partial_update: (
         UpdateBreastCancerPatientRequest | None
     ) = UpdateBreastCancerPatientRequest(),  # None -> repredict-only
-) -> BreastCancerPatient:
+) -> GetBreastCancerPatientResponse:
 
     # Fetch current features
     operation = f"""
@@ -457,7 +481,7 @@ def _update_and_repredict(
     "/{patient_id}/repredict",
     summary="Re-predict a patient's diagnosis",
     description="Re-predicts and saves the patient's diagnosis using the latest model. **No request body.**",
-    response_model=ResponseModel[BreastCancerPatient],
+    response_model=ResponseModel[GetBreastCancerPatientResponse],
     response_description="Returns the updated patient with the new diagnosis",
     status_code=status.HTTP_200_OK,
     responses={
@@ -491,7 +515,7 @@ def repredict_patient(
     ]
     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    return ResponseModel[BreastCancerPatient](
+    return ResponseModel[GetBreastCancerPatientResponse](
         data=updated_patient, detail="Re-predicted successfully"
     )
 
@@ -500,7 +524,7 @@ def repredict_patient(
     "/{patient_id}",
     summary="Update a patient (and re-predict)",
     description="Provide any subset of features to update; the diagnosis is always re-predicted and saved.",
-    response_model=ResponseModel[BreastCancerPatient],
+    response_model=ResponseModel[GetBreastCancerPatientResponse],
     response_description="Returns the updated patient",
     status_code=status.HTTP_200_OK,
     responses={
@@ -543,7 +567,7 @@ def update_patient(
     ]
     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    return ResponseModel[BreastCancerPatient](
+    return ResponseModel[GetBreastCancerPatientResponse](
         data=updated_patient, detail="Patient updated successfully"
     )
 

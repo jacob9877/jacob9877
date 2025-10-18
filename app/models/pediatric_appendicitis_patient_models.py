@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.common_models import ApprovalStatus, PaginatedResults
+from app.models.user_models import PatientUserInfo
 
 ACCEPTED_IMAGE_TYPES = Literal["jpg", "jpeg", "png", "bmp"]
 MIME_TYPE_MAPPINGS = {
@@ -151,7 +152,13 @@ class ImageResponse(BaseModel):
     )
 
 
-class PediatricAppendicitisPatientWithImages(PediatricAppendicitisPatient):
+class GetPediatricAppendicitisPatientResponse(PediatricAppendicitisPatient):
+    patient_user_info: PatientUserInfo | None = None
+
+
+class GetPediatricAppendicitisPatientResponseWithImages(
+    GetPediatricAppendicitisPatientResponse
+):
     images: list[ImageResponse]
 
 
@@ -168,4 +175,4 @@ class S3Uri(BaseModel):
 
 
 class PaginatedPediatricAppendicitisPatients(PaginatedResults):
-    patients: list[PediatricAppendicitisPatient]
+    patients: list[GetPediatricAppendicitisPatientResponse]

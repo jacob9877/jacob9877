@@ -1,9 +1,11 @@
+import json
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models.common_models import ApprovalStatus, PaginatedResults
+from app.models.user_models import PatientUserInfo
 
 
 class BreastCancerPatientFeatures(BaseModel):
@@ -79,5 +81,16 @@ class UpdateBreastCancerPatientRequest(BreastCancerDemographics):
     email: EmailStr | None = None
 
 
+class GetBreastCancerPatientResponse(BreastCancerPatient):
+    patient_user_info: PatientUserInfo | None = None
+
+    @field_validator("patient_user_info", mode="before")
+    @classmethod
+    def load_json_object(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+
 class PaginatedBreastCancerPatients(PaginatedResults):
-    patients: list[BreastCancerPatient]
+    patients: list[GetBreastCancerPatientResponse]

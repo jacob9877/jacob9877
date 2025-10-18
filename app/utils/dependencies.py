@@ -4,9 +4,15 @@ from fastapi import Depends, HTTPException, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.auth_models import TokenPayload
-from app.models.breast_cancer_patient_models import BreastCancerPatient
+from app.models.breast_cancer_patient_models import (
+    BreastCancerPatient,
+    GetBreastCancerPatientResponse,
+)
 from app.models.conversation_models import Conversation
-from app.models.pediatric_appendicitis_models import PediatricAppendicitisPatient
+from app.models.pediatric_appendicitis_patient_models import (
+    GetPediatricAppendicitisPatientResponse,
+    PediatricAppendicitisPatient,
+)
 from app.models.user_models import Condition, Role, User
 from app.utils.db import (
     get_breast_cancer_patient_by_id,
@@ -95,7 +101,7 @@ def validate_breast_cancer_patient_id(
     patient_id: int,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
-) -> BreastCancerPatient:
+) -> GetBreastCancerPatientResponse:
     patient = get_breast_cancer_patient_by_id(cursor, patient_id)
 
     if patient is None:
@@ -116,7 +122,7 @@ def validate_pediatric_appendicitis_patient_id(
     patient_id: int,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
-) -> PediatricAppendicitisPatient:
+) -> GetPediatricAppendicitisPatientResponse:
     patient = get_pediatric_appendicitis_patient_by_id(cursor, patient_id)
 
     if patient is None:

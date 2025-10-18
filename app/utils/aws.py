@@ -8,7 +8,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, status
 
-from app.models.pediatric_appendicitis_models import (
+from app.models.pediatric_appendicitis_patient_models import (
     ACCEPTED_IMAGE_TYPES,
     MIME_TYPE_MAPPINGS,
 )

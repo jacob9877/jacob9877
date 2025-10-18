@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.models.breast_cancer_patient_models import BreastCancerPatientFeatures
-from app.models.pediatric_appendicitis_models import (
+from app.models.pediatric_appendicitis_patient_models import (
     PediatricAppendicitisPatientFeatures,
 )
 

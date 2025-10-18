@@ -7,7 +7,7 @@ from app.models.patient_portal_models import (
     ClinicianInfo,
     GetPediatricAppendicitisPatientPortalResponse,
 )
-from app.models.pediatric_appendicitis_models import (
+from app.models.pediatric_appendicitis_patient_models import (
     FEATURE_NAMES,
     PediatricAppendicitisPatient,
 )

@@ -54,3 +54,9 @@ class User(RoleAndCondition):
     username: str
     email: str
     password_hash: str
+
+
+class PatientUserInfo(BaseModel):
+    first_name: str
+    last_name: str
+    email: str

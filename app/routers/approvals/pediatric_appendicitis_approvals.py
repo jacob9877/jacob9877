@@ -3,7 +3,9 @@ from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.approvals_models import PostPediatricAppendicitisApproval
 from app.models.common_models import ResponseModel
-from app.models.pediatric_appendicitis_models import PediatricAppendicitisPatient
+from app.models.pediatric_appendicitis_patient_models import (
+    PediatricAppendicitisPatient,
+)
 from app.utils.db import get_db_cursor
 from app.utils.dependencies import (
     clinicians_only,

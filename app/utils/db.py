@@ -8,10 +8,16 @@ from fastapi import Depends, HTTPException, status
 from mysql.connector import pooling
 from mysql.connector.cursor import MySQLCursorDict
 
-from app.models.breast_cancer_patient_models import BreastCancerPatient
+from app.models.breast_cancer_patient_models import (
+    BreastCancerPatient,
+    GetBreastCancerPatientResponse,
+)
 from app.models.clinical_notes_models import ClinicalNote
 from app.models.conversation_models import Conversation
-from app.models.pediatric_appendicitis_models import PediatricAppendicitisPatient
+from app.models.pediatric_appendicitis_patient_models import (
+    GetPediatricAppendicitisPatientResponse,
+    PediatricAppendicitisPatient,
+)
 from app.models.user_models import Condition, User
 
 load_dotenv(find_dotenv())
@@ -159,34 +165,56 @@ def conversation_exists(cursor: MySQLCursorDict, conversation_id: int) -> bool:
 
 def get_breast_cancer_patient_by_id(
     cursor: MySQLCursorDict, patient_id: int
-) -> BreastCancerPatient | None:
+) -> GetBreastCancerPatientResponse | None:
     operation = """
-        SELECT *
-        FROM breast_cancer_patients
-        WHERE id = %s
+        SELECT
+        p.*,
+        CASE
+            WHEN p.user_id IS NULL THEN NULL
+            ELSE CAST(JSON_OBJECT(
+            'first_name', u.first_name,
+            'last_name', u.last_name,
+            'email',    u.email
+            ) AS JSON)
+        END AS patient_user_info
+        FROM breast_cancer_patients AS p
+        LEFT JOIN users AS u
+        ON u.id = p.user_id
+        WHERE p.id = %s
     """
     params = (patient_id,)
     cursor.execute(operation, params)
     row = cursor.fetchone()
     if row is None:
         return None
-    return BreastCancerPatient(**row)
+    return GetBreastCancerPatientResponse(**row)
 
 
 def get_pediatric_appendicitis_patient_by_id(
     cursor: MySQLCursorDict, patient_id: int
-) -> PediatricAppendicitisPatient | None:
+) -> GetPediatricAppendicitisPatientResponse | None:
     operation = """
-        SELECT *
-        FROM pediatric_appendicitis_patients
-        WHERE id = %s
+        SELECT
+        p.*,
+        CASE
+            WHEN p.user_id IS NULL THEN NULL
+            ELSE CAST(JSON_OBJECT(
+            'first_name', u.first_name,
+            'last_name', u.last_name,
+            'email',    u.email
+            ) AS JSON)
+        END AS patient_user_info
+        FROM pediatric_appendicitis_patients AS p
+        LEFT JOIN users AS u
+        ON u.id = p.user_id
+        WHERE p.id = %s
     """
     params = (patient_id,)
     cursor.execute(operation, params)
     row = cursor.fetchone()
     if row is None:
         return None
-    return PediatricAppendicitisPatient(**row)
+    return GetPediatricAppendicitisPatientResponse(**row)
 
 
 def get_breast_cancer_clinical_note_by_id(
@@ -370,5 +398,7 @@ def insert_pending_email(
         WHERE id = %s
     """
     params = (email, target_patient_id)
+    cursor.execute(operation, params)
+    cursor.execute(operation, params)
     cursor.execute(operation, params)
     cursor.execute(operation, params)
