@@ -254,7 +254,7 @@ def insert_pending_email(
         # Link here
         operation = f"""
             UPDATE {target_patient_table}
-            SET user_id = %s, pending_email = NULL
+            SET user_id = %s, pending_email = NULL, name = NULL
             WHERE id = %s
         """
         params = (row["id"], target_patient_id)
@@ -370,4 +370,5 @@ def insert_pending_email(
         WHERE id = %s
     """
     params = (email, target_patient_id)
+    cursor.execute(operation, params)
     cursor.execute(operation, params)

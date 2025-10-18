@@ -35,10 +35,12 @@ def register_clinician(
 
     # Insert user into database
     operation = """
-        INSERT INTO users (username, email, password_hash, role, `condition`)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO users (first_name, last_name, username, email, password_hash, role, `condition`)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
     params = (
+        register_request.first_name,
+        register_request.last_name,
         register_request.username,
         register_request.email,
         hashed_pw,
@@ -99,10 +101,12 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
 
     # Insert user into database
     operation = """
-        INSERT INTO users (username, email, password_hash, role, `condition`)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO users (first_name, last_name, username, email, password_hash, role, `condition`)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
     params = (
+        register_request.first_name,
+        register_request.last_name,
         register_request.username,
         register_request.email,
         hashed_pw,
@@ -120,10 +124,10 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
 
         operation = f"""
             UPDATE {table}
-            SET pending_email = %s, user_id = %s
+            SET pending_email = NULL, user_id = %s, name = NULL
             WHERE id = %s
         """
-        params = (None, new_user_id, patient_id)
+        params = (new_user_id, patient_id)
         cursor.execute(operation, params)
 
     return new_user_id

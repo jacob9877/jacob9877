@@ -33,5 +33,7 @@ class RefreshResponse(BaseModel):
 
 
 class MeResponse(RoleAndCondition):
+    first_name: str
+    last_name: str
     username: str
     email: str

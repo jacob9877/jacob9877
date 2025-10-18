@@ -176,6 +176,8 @@ def me(
 
     return ResponseModel[MeResponse](
         data=MeResponse(
+            first_name=current_user.first_name,
+            last_name=current_user.last_name,
             username=current_user.username,
             email=current_user.email,
             role=current_user.role,

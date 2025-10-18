@@ -29,6 +29,8 @@ class RoleAndCondition(BaseModel):
 
 
 class RegisterRequest(RoleAndCondition):
+    first_name: str
+    last_name: str
     username: str = Field(..., description="User's username", example="johndoe")
     email: EmailStr = Field(
         ..., description="User's email address", example="johndoe@gmail.com"
@@ -47,6 +49,8 @@ class PasswordResetConfirm(BaseModel):
 
 class User(RoleAndCondition):
     id: int
+    first_name: str
+    last_name: str
     username: str
     email: str
     password_hash: str
