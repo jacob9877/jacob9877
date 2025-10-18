@@ -16,7 +16,7 @@ from app.models.pediatric_appendicitis_models import (
 ATTEMPTS = 4
 
 
-def get_predictions(body: dict, sagemaker_endpoint_name) -> dict:
+def get_predictions(body: dict, sagemaker_endpoint_name: str) -> dict:
     sagemaker_client = boto3.client(
         "sagemaker-runtime",
         config=Config(retries={"max_attempts": ATTEMPTS, "mode": "standard"}),

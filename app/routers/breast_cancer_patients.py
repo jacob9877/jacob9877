@@ -17,6 +17,7 @@ from fastapi import (
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import (
+    DEMOGRAPHICS_NAMES,
     FEATURE_NAMES,
     AddBreastCancerPatientRequest,
     AddBreastCancerPatientsRequest,
@@ -138,11 +139,36 @@ def add_patient(
     current_user: User = Depends(get_current_user),
 ):
 
-    add_patients_request = AddBreastCancerPatientsRequest(
-        patients=[add_patient_request.model_dump(exclude={"email"})]
+    instance = list(add_patient_request.model_dump(include=set(FEATURE_NAMES)).values())
+    result = get_predictions({"instances": [instance]}, SAGEMAKER_ENDPOINT_NAME)
+    diagnosis = [
+        prediction[0] if isinstance(prediction, list) else prediction
+        for prediction in result["predictions"]
+    ][0]
+    column_names = [
+        "clinician_user_id",
+        "name",
+        *DEMOGRAPHICS_NAMES,
+        *FEATURE_NAMES,
+        "diagnosis",
+    ]
+    placeholders = ", ".join(["%s"] * len(column_names))
+    operation = f"""
+        INSERT INTO breast_cancer_patients ({", ".join(column_names)})
+        VALUES ({placeholders})
+    """
+    params = tuple(
+        [current_user.id, add_patient_request.name]
+        + [
+            getattr(add_patient_request, demographic_name)
+            for demographic_name in DEMOGRAPHICS_NAMES
+        ]
+        + [getattr(add_patient_request, feature_name) for feature_name in FEATURE_NAMES]
+        + [diagnosis]
     )
-
-    inserted_patient = _add_patients(cursor, current_user.id, add_patients_request)[0]
+    cursor.execute(operation, params)
+    new_patient_id = cursor.lastrowid
+    inserted_patient = get_breast_cancer_patient_by_id(cursor, new_patient_id)
 
     if add_patient_request.email:
         insert_pending_email(

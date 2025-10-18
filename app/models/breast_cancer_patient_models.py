@@ -17,13 +17,27 @@ class BreastCancerPatientFeatures(BaseModel):
 FEATURE_NAMES = list(BreastCancerPatientFeatures.model_fields.keys())
 
 
+class BreastCancerDemographics(BaseModel):
+    Age: float | None = None
+    Sex: Literal["male", "female"] | None = None
+    Height: float | None = None
+    Weight: float | None = None
+    BMI: float | None = None
+
+
+DEMOGRAPHICS_NAMES = list(BreastCancerDemographics.model_fields.keys())
+
+
 class AddBreastCancerPatientsRequest(BaseModel):
     patients: list[BreastCancerPatientFeatures] = Field(
         ..., min_items=1, description="List of breast cancer patients to add"
     )
 
 
-class AddBreastCancerPatientRequest(BreastCancerPatientFeatures):
+class AddBreastCancerPatientRequest(
+    BreastCancerDemographics, BreastCancerPatientFeatures
+):
+    name: str | None = None
     email: EmailStr | None = None
 
 
@@ -32,7 +46,9 @@ class BreastCancerApprovals(BaseModel):
 
 
 # Should be identical to the schema of the database
-class BreastCancerPatient(BreastCancerPatientFeatures, BreastCancerApprovals):
+class BreastCancerPatient(
+    BreastCancerPatientFeatures, BreastCancerDemographics, BreastCancerApprovals
+):
     id: int = Field(..., description="ID of the breast cancer patient", example=1)
     clinician_user_id: int = Field(
         ...,
@@ -41,6 +57,7 @@ class BreastCancerPatient(BreastCancerPatientFeatures, BreastCancerApprovals):
     )
     user_id: int | None = None
     pending_email: str | None = None
+    name: str | None = None
     diagnosis: Literal[0, 1] = Field(
         ..., description="Diagnosis: 0 for benign, 1 for malignant", example=1
     )
@@ -52,7 +69,8 @@ class BreastCancerPatient(BreastCancerPatientFeatures, BreastCancerApprovals):
     )
 
 
-class UpdateBreastCancerPatientRequest(BaseModel):
+class UpdateBreastCancerPatientRequest(BreastCancerDemographics):
+    name: str | None = None
     mean_radius: float | None = Field(default=None, gt=0, example=13.54)
     mean_texture: float | None = Field(default=None, gt=0, example=14.36)
     mean_perimeter: float | None = Field(default=None, gt=0, example=87.46)
