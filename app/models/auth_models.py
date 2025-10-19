@@ -2,7 +2,7 @@ from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.user_models import Condition, Role, RoleAndCondition
+from app.models.user_models import Condition, Role, RoleAndCondition, UserSummary
 
 
 class TokenType(str, Enum):
@@ -18,10 +18,8 @@ class TokenPayload(RoleAndCondition):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(
-        ..., description="User's email address", example="user@example.com"
-    )
-    password: str = Field(..., description="User's password", example="password123")
+    email: EmailStr = Field(..., example="user@example.com")
+    password: str = Field(..., example="password123")
 
 
 class LoginResponse(BaseModel):
@@ -32,8 +30,4 @@ class RefreshResponse(BaseModel):
     access_token: str
 
 
-class MeResponse(RoleAndCondition):
-    first_name: str
-    last_name: str
-    username: str
-    email: str
+class MeResponse(UserSummary, RoleAndCondition, extra="ignore"): ...

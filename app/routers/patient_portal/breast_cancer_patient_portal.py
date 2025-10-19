@@ -1,14 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
-from app.models.breast_cancer_patient_models import FEATURE_NAMES, BreastCancerPatient
-from app.models.clinical_notes_models import ClinicalNoteBase
+from app.models.breast_cancer_patient_models import (
+    FEATURE_NAMES,
+    Patient,
+    DEMOGRAPHICS_NAMES,
+)
+from app.models.clinical_notes_models import GetClinicalNoteResponse
 from app.models.common_models import ResponseModel
 from app.models.patient_portal_models import (
-    ClinicianInfo,
     GetBreastCancerPatientPortalResponse,
 )
-from app.models.user_models import Condition, User
+from app.models.user_models import Condition, User, UserSummary
 from app.utils.db import get_db_cursor
 from app.utils.dependencies import get_current_user, patients_with, require_access
 
@@ -36,7 +39,7 @@ router = APIRouter(
 def get_patient_info_for_user(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
-) -> BreastCancerPatient:
+) -> Patient:
 
     operation = """
         SELECT *
@@ -50,7 +53,7 @@ def get_patient_info_for_user(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No patient info found"
         )
-    patient = BreastCancerPatient(**row)
+    patient = Patient(**row)
     return patient
 
 
@@ -64,10 +67,11 @@ def get_patient_info_for_user(
 )
 def get_current_patient_info(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    patient: BreastCancerPatient = Depends(get_patient_info_for_user),
+    patient: Patient = Depends(get_patient_info_for_user),
 ):
-    operation = """
-        SELECT first_name, last_name, email
+    columns = list(UserSummary.model_fields.keys())
+    operation = f"""
+        SELECT {" ,".join(columns)}
         FROM users
         WHERE id = %s
     """
@@ -75,20 +79,15 @@ def get_current_patient_info(
     cursor.execute(operation, params)
     row = cursor.fetchone()
 
-    features = {
-        feature_name: getattr(patient, feature_name) for feature_name in FEATURE_NAMES
-    }
+    patient_fields_to_include = (
+        FEATURE_NAMES + DEMOGRAPHICS_NAMES + ["created_at", "updated_at"]
+    )
+    if patient.diagnosis_approval_status == "approved":
+        patient_fields_to_include.append("diagnosis")
+
     response = GetBreastCancerPatientPortalResponse(
-        **features,
-        created_at=patient.created_at,
-        updated_at=patient.updated_at,
-        clinician=ClinicianInfo(**row),
-        # Only include predictions if approved by clinician
-        diagnosis=(
-            patient.diagnosis
-            if patient.diagnosis_approval_status == "approved"
-            else None
-        )
+        **patient.model_dump(include=set(patient_fields_to_include)),
+        clinician_user_info=row,
     )
     return ResponseModel[GetBreastCancerPatientPortalResponse](
         data=response, detail="Patient info retrieved successfully"
@@ -99,16 +98,17 @@ def get_current_patient_info(
     "/clinical-notes",
     summary="Get breast cancer patient clinical notes",
     description="Get clinical notes for the currently logged-in breast cancer patient",
-    response_model=ResponseModel[list[ClinicalNoteBase]],
+    response_model=ResponseModel[list[GetClinicalNoteResponse]],
     response_description="Clinical notes sorted descending by updated_at",
     status_code=status.HTTP_200_OK,
 )
 def get_current_patient_clinical_notes(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    patient: BreastCancerPatient = Depends(get_patient_info_for_user),
+    patient: Patient = Depends(get_patient_info_for_user),
 ):
-    operation = """
-        SELECT id, content, created_at, updated_at
+    columns = list(GetClinicalNoteResponse.model_fields.keys())
+    operation = f"""
+        SELECT {" ,".join(columns)}
         FROM breast_cancer_clinical_notes
         WHERE patient_id = %s
         ORDER BY updated_at DESC, id DESC
@@ -117,8 +117,8 @@ def get_current_patient_clinical_notes(
     cursor.execute(operation, params)
     rows = cursor.fetchall()
 
-    clinical_notes = [ClinicalNoteBase(**row) for row in rows]
+    clinical_notes = [GetClinicalNoteResponse(**row) for row in rows]
 
-    return ResponseModel[list[ClinicalNoteBase]](
+    return ResponseModel[list[GetClinicalNoteResponse]](
         data=clinical_notes, detail="Successfully retrieved clinical notes"
     )

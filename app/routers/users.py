@@ -35,13 +35,12 @@ def register_clinician(
 
     # Insert user into database
     operation = """
-        INSERT INTO users (first_name, last_name, username, email, password_hash, role, `condition`)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO users (first_name, last_name, email, password_hash, role, `condition`)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """
     params = (
         register_request.first_name,
         register_request.last_name,
-        register_request.username,
         register_request.email,
         hashed_pw,
         Role.CLINICIAN.value,
@@ -101,13 +100,12 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
 
     # Insert user into database
     operation = """
-        INSERT INTO users (first_name, last_name, username, email, password_hash, role, `condition`)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO users (first_name, last_name, email, password_hash, role, `condition`)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """
     params = (
         register_request.first_name,
         register_request.last_name,
-        register_request.username,
         register_request.email,
         hashed_pw,
         Role.PATIENT.value,
@@ -136,14 +134,14 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
 @router.post(
     "/register",
     summary="Register a new user",
-    description="Creates a new user account with a unique email and username. Returns nothing upon success. Must log in separately to get an access token.",
+    description="Creates a new user account with a unique email. Returns nothing upon success. Must log in separately to get an access token.",
     response_model=ResponseModel[None],
     response_description="Returns nothing on success",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_409_CONFLICT: {
             "model": ResponseModel[None],
-            "description": "User with the provided email or username already exists",
+            "description": "User with the provided email already exists",
         },
     },
 )
@@ -151,19 +149,6 @@ def register(
     register_request: RegisterRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    # Check if user exists with provided username
-    operation = """
-        SELECT id
-        FROM users
-        WHERE username = %s
-    """
-    params = (register_request.username,)
-    cursor.execute(operation, params)
-    if cursor.fetchone():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Username is taken"
-        )
-
     # Check if user exists with provided email
     operation = """
         SELECT id

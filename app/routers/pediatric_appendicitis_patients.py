@@ -8,19 +8,19 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.common_models import ResponseModel
 from app.models.pediatric_appendicitis_patient_models import (
     FEATURE_NAMES,
-    CreateImagesRequest,
-    GetPediatricAppendicitisPatientResponse,
-    GetPediatricAppendicitisPatientResponseWithImages,
+    Features,
+    GetPatientResponse,
+    GetPatientResponseWithImages,
     ImageResponse,
-    PaginatedPediatricAppendicitisPatients,
-    PediatricAppendicitisPatient,
-    PediatricAppendicitisPatientFeatures,
-    PediatricAppendicitisPredictions,
+    PaginatedPatients,
+    Patient,
+    PostImagesRequest,
+    Predictions,
     PresignedUpload,
     S3Uri,
-    UpsertPediatricAppendicitisPatientRequest,
+    UpsertPatientRequest,
 )
-from app.models.user_models import User
+from app.models.user_models import User, UserSummary
 from app.utils.aws import (
     bulk_send_message_to_sqs,
     create_presigned_post_for_image,
@@ -72,7 +72,7 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
     response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request)",
 )
 def create_presigned_uploads(
-    request: CreateImagesRequest,
+    request: PostImagesRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
@@ -140,24 +140,25 @@ def _insert_patient(
     cursor: MySQLCursorDict,
     clinician_user_id: int,
     name: str | None,
-    features: PediatricAppendicitisPatientFeatures,
-    predictions: PediatricAppendicitisPredictions,
-) -> GetPediatricAppendicitisPatientResponse:
-    column_names = [
+    features: Features,
+    predictions: Predictions,
+) -> GetPatientResponse:
+    predictions_keys = list(Predictions.model_fields.keys())
+    columns = [
         "clinician_user_id",
         "name",
         *FEATURE_NAMES,
-        *list(PediatricAppendicitisPredictions.model_fields.keys()),
+        *predictions_keys,
     ]
-    placeholders = ", ".join(["%s"] * len(column_names))
+    placeholders = ", ".join(["%s"] * len(columns))
     operation = f"""
-        INSERT INTO pediatric_appendicitis_patients ({", ".join(column_names)})
+        INSERT INTO pediatric_appendicitis_patients ({", ".join(columns)})
         VALUES ({placeholders})
     """
     params = tuple(
         [clinician_user_id, name]
         + [getattr(features, feature_name) for feature_name in FEATURE_NAMES]
-        + list(predictions.model_dump().values())
+        + [getattr(predictions, prediction_key) for prediction_key in predictions_keys]
     )
     cursor.execute(operation, params)
     patient_id = cursor.lastrowid
@@ -171,16 +172,15 @@ def _insert_patient(
     "",
     summary="Add a pediatric appendicitis patient",
     description="Given the features and upload_ids of any associated images, add and predict for a new pediatric appendicitis patient.",
-    response_model=ResponseModel[GetPediatricAppendicitisPatientResponseWithImages],
+    response_model=ResponseModel[GetPatientResponseWithImages],
     response_description="Patient information along with pre-signed URLs for any associated images",
     status_code=status.HTTP_201_CREATED,
 )
 def add_patient(
-    add_patient_request: UpsertPediatricAppendicitisPatientRequest,
+    add_patient_request: UpsertPatientRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     image_s3_uris = [
         _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
         for upload_id in add_patient_request.image_upload_ids
@@ -190,14 +190,14 @@ def add_patient(
         "features": add_patient_request.features.model_dump(),
         "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
     }
-    predictions = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
-    predictions_validated = PediatricAppendicitisPredictions(**predictions)
+    result = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
+    predictions = Predictions(**result)
     new_patient = _insert_patient(
-        cursor,
-        current_user.id,
-        add_patient_request.name,
-        add_patient_request.features,
-        predictions_validated,
+        cursor=cursor,
+        clinician_user_id=current_user.id,
+        name=add_patient_request.name,
+        features=add_patient_request.features,
+        predictions=predictions,
     )
 
     if add_patient_request.image_upload_ids:
@@ -217,10 +217,10 @@ def add_patient(
 
     if add_patient_request.email:
         insert_pending_email(
-            cursor,
-            add_patient_request.email,
-            new_patient.id,
-            "pediatric_appendicitis_patients",
+            cursor=cursor,
+            email=add_patient_request.email,
+            target_patient_id=new_patient.id,
+            target_patient_table="pediatric_appendicitis_patients",
         )
 
     images: list[ImageResponse] = []
@@ -230,15 +230,15 @@ def add_patient(
         presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
         images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
 
-    patient_with_images = GetPediatricAppendicitisPatientResponseWithImages(
+    patient_with_images = GetPatientResponseWithImages(
         **new_patient.model_dump(), images=images
     )
 
     # Send the new patient info to SQS for explanation processing
     features = {
-        "Diagnosis": predictions_validated.diagnosis,
-        "Management": predictions_validated.management,
-    } | patient_with_images.model_dump(include=set(FEATURE_NAMES))
+        "Diagnosis": predictions.diagnosis,
+        "Management": predictions.management,
+    } | patient_with_images.model_dump(include=FEATURE_NAMES)
     messages = [
         {
             "patient_id": new_patient.id,
@@ -248,7 +248,7 @@ def add_patient(
     ]
     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
 
-    return ResponseModel[GetPediatricAppendicitisPatientResponseWithImages](
+    return ResponseModel[GetPatientResponseWithImages](
         data=patient_with_images,
         detail="Patient added, predictions obtained, and URLs created successfully",
     )
@@ -257,7 +257,7 @@ def add_patient(
 @router.get(
     "/{patient_id}",
     summary="Get a patient by ID",
-    response_model=ResponseModel[GetPediatricAppendicitisPatientResponseWithImages],
+    response_model=ResponseModel[GetPatientResponseWithImages],
     response_description="Returns the pediatric appendicitis patient with the provided ID, with pre-signed URLs for any images associated with the patient",
     status_code=status.HTTP_200_OK,
     responses={
@@ -274,12 +274,9 @@ def add_patient(
 def get_patient(
     patient_id: int = Path(..., description="ID of the patient to get"),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
-    patient: GetPediatricAppendicitisPatientResponse = Depends(
-        validate_pediatric_appendicitis_patient_id
-    ),
+    patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
     current_user: User = Depends(get_current_user),
 ):
-
     # Fetch any images associated with the patient
     operation = """
         SELECT upload_id, file_type
@@ -297,11 +294,11 @@ def get_patient(
         presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
         images.append(ImageResponse(upload_id=row["upload_id"], url=presigned_url))
 
-    patient_with_images = GetPediatricAppendicitisPatientResponseWithImages(
+    patient_with_images = GetPatientResponseWithImages(
         **patient.model_dump(), images=images
     )
 
-    return ResponseModel[GetPediatricAppendicitisPatientResponseWithImages](
+    return ResponseModel[GetPatientResponseWithImages](
         data=patient_with_images,
         detail="Patient fetched and URLs created successfully",
     )
@@ -314,7 +311,7 @@ def get_patient(
         "Retrieves pediatric appendicitis patients for the current user (by the provided access token) using cursor-based pagination, "
         "sorted by most recently updated."
     ),
-    response_model=ResponseModel[PaginatedPediatricAppendicitisPatients],
+    response_model=ResponseModel[PaginatedPatients],
     response_description="Returns a page of patients plus a next_cursor if more data exists",
     status_code=status.HTTP_200_OK,
     responses={
@@ -340,20 +337,20 @@ def get_pediatric_appendicitis_patients_paginated(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     # Order is (updated_at DESC, id DESC).
     # For "next page", fetch rows strictly "after" the cursor in that order:
     # updated_at < cursor_ts OR (updated_at = cursor_ts AND id < cursor_id)
-    operation = """
+    user_summary_query = ",\n".join(
+        f"'{field}', u.{field}\n" for field in UserSummary.model_fields.keys()
+    )
+    operation = f"""
         SELECT
             p.*,
             CASE
                 WHEN p.user_id IS NULL THEN NULL
-                ELSE CAST(JSON_OBJECT(
-                    'first_name', u.first_name,
-                    'last_name',  u.last_name,
-                    'email',      u.email
-                ) AS JSON)
+                ELSE JSON_OBJECT(
+                    {user_summary_query}
+                )
             END AS patient_user_info
         FROM pediatric_appendicitis_patients AS p
         LEFT JOIN users AS u
@@ -401,7 +398,7 @@ def get_pediatric_appendicitis_patients_paginated(
     if has_more:
         rows = rows[:limit]  # only return 'limit' items
 
-    patients = [GetPediatricAppendicitisPatientResponse(**row) for row in rows]
+    patients = [GetPatientResponse(**row) for row in rows]
 
     next_cursor: str | None = None
     if has_more and rows:
@@ -410,12 +407,12 @@ def get_pediatric_appendicitis_patients_paginated(
         last_row_id: int = last_row["id"]
         next_cursor = encode_cursor(last_updated_at, last_row_id)
 
-    paginated_patients = PaginatedPediatricAppendicitisPatients(
+    paginated_patients = PaginatedPatients(
         next_cursor=next_cursor,
         total_count=total_count,
         patients=patients,
     )
-    return ResponseModel[PaginatedPediatricAppendicitisPatients](
+    return ResponseModel[PaginatedPatients](
         data=paginated_patients,
         detail="Patients retrieved successfully",
     )
@@ -426,7 +423,7 @@ def get_pediatric_appendicitis_patients_paginated(
     summary="Delete a patient by ID",
     description="Delete the patient with the provided patient ID",
     status_code=status.HTTP_204_NO_CONTENT,
-    response_description="Nothing important. A status code of 204 on the response indicates success.",
+    response_description="Nothing",
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
@@ -462,15 +459,16 @@ def _update_patient(
     cursor: MySQLCursorDict,
     patient_id: int,
     name: str | None,
-    features: PediatricAppendicitisPatientFeatures,
-    predictions: PediatricAppendicitisPredictions,
-) -> GetPediatricAppendicitisPatientResponse:
-    column_names = [
+    features: Features,
+    predictions: Predictions,
+) -> GetPatientResponse:
+    predictions_keys = list(Predictions.model_fields.keys())
+    columns = [
         "name",
         *FEATURE_NAMES,
-        *list(PediatricAppendicitisPredictions.model_fields.keys()),
+        *predictions_keys,
     ]
-    set_clause = ", ".join(f"{column_name}=%s" for column_name in column_names)
+    set_clause = ", ".join(f"{column}=%s" for column in columns)
     operation = f"""
         UPDATE pediatric_appendicitis_patients
         SET {set_clause}
@@ -479,7 +477,9 @@ def _update_patient(
     params = (
         (name,)
         + tuple(getattr(features, name) for name in FEATURE_NAMES)
-        + tuple(predictions.model_dump().values())
+        + tuple(
+            getattr(predictions, prediction_key) for prediction_key in predictions_keys
+        )
         + (patient_id,)
     )
     cursor.execute(operation, params)
@@ -493,7 +493,7 @@ def _update_patient(
     "/{patient_id}",
     summary="Update a patient (and re-predict)",
     description="Provide the new patient info; the predictions are always re-predicted and saved.",
-    response_model=ResponseModel[GetPediatricAppendicitisPatientResponseWithImages],
+    response_model=ResponseModel[GetPatientResponseWithImages],
     response_description="Returns the updated patient with pre-signed URLs for any images",
     status_code=status.HTTP_200_OK,
     responses={
@@ -509,7 +509,7 @@ def _update_patient(
 )
 def update_patient(
     patient_id: int,
-    update_patient_request: UpsertPediatricAppendicitisPatientRequest,
+    update_patient_request: UpsertPatientRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
@@ -544,22 +544,22 @@ def update_patient(
         "features": update_patient_request.features.model_dump(),
         "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
     }
-    predictions = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
-    predictions_validated = PediatricAppendicitisPredictions(**predictions)
+    result = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
+    predictions = Predictions(**result)
 
     new_patient = _update_patient(
-        cursor,
-        patient_id,
-        update_patient_request.name,
-        update_patient_request.features,
-        predictions_validated,
+        cursor=cursor,
+        patient_id=patient_id,
+        name=update_patient_request.name,
+        features=update_patient_request.features,
+        predictions=predictions,
     )
 
     if update_patient_request.email:
         insert_pending_email(
-            cursor,
-            update_patient_request.email,
-            new_patient.id,
+            cursor=cursor,
+            email=update_patient_request.email,
+            target_patient_id=new_patient.id,
             target_patient_table="pediatric_appendicitis_patients",
         )
 
@@ -583,11 +583,11 @@ def update_patient(
         presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
         images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
 
-    patient_with_images = GetPediatricAppendicitisPatientResponseWithImages(
+    patient_with_images = GetPatientResponseWithImages(
         **new_patient.model_dump(), images=images
     )
 
-    return ResponseModel[GetPediatricAppendicitisPatientResponseWithImages](
+    return ResponseModel[GetPatientResponseWithImages](
         data=patient_with_images,
         detail="Patient updated, predictions obtained, and URLs created successfully",
     )
@@ -621,7 +621,6 @@ def delete_patients(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     # Verify all IDs exist
     placeholders = ",".join(["%s"] * len(patient_ids))
     operation = f"""

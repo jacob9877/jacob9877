@@ -1,10 +1,10 @@
-from datetime import datetime
-from typing import Literal
+import json
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models.common_models import ApprovalStatus, PaginatedResults
-from app.models.user_models import PatientUserInfo
+from app.models.common_models import ApprovalStatus, PaginatedResults, PatientBase
+from app.models.user_models import UserSummary
 
 ACCEPTED_IMAGE_TYPES = Literal["jpg", "jpeg", "png", "bmp"]
 MIME_TYPE_MAPPINGS = {
@@ -15,11 +15,13 @@ MIME_TYPE_MAPPINGS = {
 }
 
 
-class CreateImagesRequest(BaseModel):
+class PostImagesRequest(BaseModel):
     file_types: list[ACCEPTED_IMAGE_TYPES]  # List of accepted image file types
 
 
-class PresignedPostFields(BaseModel):
+class PresignedPostFields(BaseModel, extra="ignore"):
+    """Fields object associated with a pre-signed POST URL. Defining this class is helpful for OpenAPI docs"""
+
     key: str
     content_type: str = Field(example="image/bmp", alias="Content-Type")
     algorithm: str = Field(example="AWS4-HMAC-SHA256", alias="x-amz-algorithm")
@@ -27,10 +29,7 @@ class PresignedPostFields(BaseModel):
     date: str = Field(alias="x-amz-date")
     policy: str
     signature: str = Field(alias="x-amz-signature")
-    security_token: str | None = Field(alias="x-amz-security-token")
-
-    class Config:
-        extra = "ignore"
+    security_token: str | None = Field(default=None, alias="x-amz-security-token")
 
 
 class PresignedUpload(BaseModel):
@@ -41,13 +40,17 @@ class PresignedUpload(BaseModel):
     fields: PresignedPostFields
 
 
-class PediatricAppendicitisPatientFeatures(BaseModel):
+class Features(BaseModel):
     # Demographic
     Age: float = Field(gt=0, example=12.68)
     Sex: Literal["male", "female"] = Field(example="female")
-    Height: float = Field(gt=0, example=148.0)
-    Weight: float = Field(gt=0, example=37.0)
-    BMI: float = Field(gt=0, example=16.90)
+    Height: float = Field(gt=0, example=148.0, description="Height in centimeters (cm)")
+    Weight: float = Field(gt=0, example=37.0, description="Weight in kilograms (kg)")
+    BMI: float = Field(
+        gt=0,
+        example=16.90,
+        description="Weight in kilograms (kg) / Height in meters (m)",
+    )
 
     # Scoring
     Alvarado_Score: int = Field(gte=0, example=4)
@@ -119,30 +122,25 @@ class PediatricAppendicitisPatientFeatures(BaseModel):
     # Gynecological_Findings not accepted due to it having no restrictions on its value
 
 
-FEATURE_NAMES = list(PediatricAppendicitisPatientFeatures.model_fields.keys())
+FEATURE_NAMES = list(Features.model_fields.keys())
 
 
-class PediatricAppendicitisPredictions(BaseModel):
-    diagnosis: Literal["appendicitis", "no appendicitis"]
+class Predictions(BaseModel):
+    diagnosis: Literal["no appendicitis", "appendicitis"]
     management: Literal["conservative", "surgical"]
     length_of_stay_pred: float
     length_of_stay_pi_lower: float
     length_of_stay_pi_upper: float
 
 
-class PediatricAppendicitisPatient(
-    PediatricAppendicitisPatientFeatures, PediatricAppendicitisPredictions
-):
-    id: int
-    clinician_user_id: int
-    user_id: int | None = None
-    pending_email: str | None = Field(default=None, example="user@example.com")
-    name: str | None = Field(default=None, example="John Doe")
+class Approvals(BaseModel):
     diagnosis_approval_status: ApprovalStatus | None = None
     management_approval_status: ApprovalStatus | None = None
     length_of_stay_approval_status: ApprovalStatus | None = None
-    created_at: datetime
-    updated_at: datetime
+
+
+class Patient(PatientBase, Features, Predictions, Approvals):
+    """Database model for pediatric_appendicitis_patients"""
 
 
 class ImageResponse(BaseModel):
@@ -152,20 +150,33 @@ class ImageResponse(BaseModel):
     )
 
 
-class GetPediatricAppendicitisPatientResponse(PediatricAppendicitisPatient):
-    patient_user_info: PatientUserInfo | None = None
+class GetPatientResponse(Patient):
+    patient_user_info: UserSummary | None = None
+
+    @field_validator("patient_user_info", mode="before")
+    @classmethod
+    def load_json_object(cls, value: Any) -> Any:
+        """If patient_user_info comes in as stringified JSON, parse it first."""
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
 
 
-class GetPediatricAppendicitisPatientResponseWithImages(
-    GetPediatricAppendicitisPatientResponse
-):
+class GetPatientResponseWithImages(GetPatientResponse):
     images: list[ImageResponse]
 
 
-class UpsertPediatricAppendicitisPatientRequest(BaseModel):
-    features: PediatricAppendicitisPatientFeatures
-    image_upload_ids: list[str] | None = []
-    name: str | None = Field(default=None, example="John Doe")
+class UpsertPatientRequest(BaseModel):
+    features: Features
+    image_upload_ids: list[str] | None = Field(
+        default=[],
+        description="List of upload ids associated with pre-signed uploads already completed",
+    )
+    name: str | None = Field(
+        default=None,
+        example="John Doe",
+        description="Optionally set a name/nickname for the patient, this will be overriden if the patient has an account",
+    )
     email: EmailStr | None = Field(default=None, example="user@example.com")
 
 
@@ -174,5 +185,5 @@ class S3Uri(BaseModel):
     key: str
 
 
-class PaginatedPediatricAppendicitisPatients(PaginatedResults):
-    patients: list[GetPediatricAppendicitisPatientResponse]
+class PaginatedPatients(PaginatedResults):
+    patients: list[GetPatientResponse]

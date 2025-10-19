@@ -5,13 +5,15 @@ from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.auth_models import TokenPayload
 from app.models.breast_cancer_patient_models import (
-    BreastCancerPatient,
-    GetBreastCancerPatientResponse,
+    GetPatientResponse as GetBreastCancerPatientResponse,
 )
+from app.models.breast_cancer_patient_models import Patient as BreastCancerPatient
 from app.models.conversation_models import Conversation
 from app.models.pediatric_appendicitis_patient_models import (
-    GetPediatricAppendicitisPatientResponse,
-    PediatricAppendicitisPatient,
+    GetPatientResponse as GetPediatricAppendicitisPatientResponse,
+)
+from app.models.pediatric_appendicitis_patient_models import (
+    Patient as PediatricAppendicitisPatient,
 )
 from app.models.user_models import Condition, Role, User
 from app.utils.db import (

@@ -5,6 +5,7 @@ from pydantic import BaseModel, model_validator
 from typing_extensions import Self
 
 from app.models.chat_models import Message
+from app.models.common_models import Timestamps
 
 AssistantSlug = Literal[
     "clinician-breast-cancer",
@@ -20,19 +21,16 @@ class ConversationSummary(BaseModel):
     patient_id: int | None = None  # If the conversation is patient-specific
 
 
-class Conversation(BaseModel):
-    id: int
+class Conversation(ConversationSummary, Timestamps):
+    """Database model for conversations table"""
+
     user_id: int
-    title: str
-    created_at: datetime
-    updated_at: datetime
-    patient_id: int | None = None  # If the conversation is patient-specific
     assistant: AssistantSlug
 
 
 class StartConversationRequest(BaseModel):
     user_message: str
-    patient_id: int | None = None  # If the conversation is patient-specific
+    patient_id: int | None = None  # If the conversation is to be patient-specific
     assistant: AssistantSlug
 
     @model_validator(mode="after")

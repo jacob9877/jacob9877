@@ -28,16 +28,6 @@ class RoleAndCondition(BaseModel):
         return self
 
 
-class RegisterRequest(RoleAndCondition):
-    first_name: str
-    last_name: str
-    username: str = Field(..., description="User's username", example="johndoe")
-    email: EmailStr = Field(
-        ..., description="User's email address", example="johndoe@gmail.com"
-    )
-    password: str = Field(..., description="User's password", example="password123")
-
-
 class PasswordResetRequest(BaseModel):
     email: EmailStr
 
@@ -47,16 +37,18 @@ class PasswordResetConfirm(BaseModel):
     new_password: str
 
 
-class User(RoleAndCondition):
-    id: int
-    first_name: str
-    last_name: str
-    username: str
-    email: str
-    password_hash: str
-
-
-class PatientUserInfo(BaseModel):
+class UserSummary(BaseModel):
     first_name: str = Field(..., example="John")
     last_name: str = Field(..., example="Doe")
-    email: str = Field(..., example="user@example.com")
+    email: EmailStr = Field(..., example="user@example.com")
+
+
+class RegisterRequest(UserSummary, RoleAndCondition):
+    password: str = Field(..., example="password123")
+
+
+class User(UserSummary, RoleAndCondition):
+    """Database model for users table"""
+
+    id: int
+    password_hash: str

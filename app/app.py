@@ -31,7 +31,7 @@ from app.routers.patient_portal import (
 load_dotenv(find_dotenv(), override=True)
 
 app = FastAPI(
-    root_path="/v2",
+    root_path="/v2",  # root_path must match the API Gateway stage name
     title="AI for Medical Outcomes API",
     description="All responses except auto-thrown 422 codes will follow standard response model with keys 'data' and 'detail'. Never infer anything about the value of the 'detail' key, use the status code instead.",
     responses={
@@ -40,7 +40,8 @@ app = FastAPI(
             "description": "An error occurred on our end",
         },
     },
-)  # root_path must match the API Gateway stage name
+    swagger_ui_parameters={"operationsSorter": "method"},
+)
 
 
 @app.exception_handler(HTTPException)
@@ -64,14 +65,15 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(breast_cancer_patients.router)
 app.include_router(breast_cancer_clinical_notes.router)
+app.include_router(breast_cancer_approvals.router)
 app.include_router(pediatric_appendicitis_patients.router)
 app.include_router(pediatric_appendicitis_clinical_notes.router)
+app.include_router(pediatric_appendicitis_approvals.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
 app.include_router(breast_cancer_patient_portal.router)
 app.include_router(pediatric_appendicitis_patient_portal.router)
-app.include_router(breast_cancer_approvals.router)
-app.include_router(pediatric_appendicitis_approvals.router)
+
 
 app.add_middleware(
     CORSMiddleware,

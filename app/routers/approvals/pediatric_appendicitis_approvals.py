@@ -4,7 +4,7 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.approvals_models import PostPediatricAppendicitisApproval
 from app.models.common_models import ResponseModel
 from app.models.pediatric_appendicitis_patient_models import (
-    PediatricAppendicitisPatient,
+    Patient,
 )
 from app.utils.db import get_db_cursor
 from app.utils.dependencies import (
@@ -30,27 +30,22 @@ router = APIRouter(
     "",
     summary="Set prediction approval status",
     description="Set or reset the status of a prediction approval",
-    status_code=status.HTTP_200_OK,
-    response_model=ResponseModel[None],
-    response_description="Nothing much. 200 OK status code indicates success",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_description="Nothing",
 )
 def post_approval(
     approval_request: PostPediatricAppendicitisApproval,
-    patient: PediatricAppendicitisPatient = Depends(
-        validate_pediatric_appendicitis_patient_id
-    ),
+    patient: Patient = Depends(validate_pediatric_appendicitis_patient_id),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-
     approvals = approval_request.model_dump(exclude_unset=True)
 
     if not approvals:
-        return ResponseModel[None](detail="Didn't update anything")
+        return
 
     set_parts = []
     params = []
     for field, new_approval_status in approvals.items():
-
         approval_status_column = f"{field}_approval_status"
         set_parts.append(f"{approval_status_column}=%s")
         params.append(new_approval_status)
@@ -64,4 +59,4 @@ def post_approval(
     params.append(patient.id)
     cursor.execute(operation, tuple(params))
 
-    return ResponseModel[None](detail="Approval status updated successfully")
+    return

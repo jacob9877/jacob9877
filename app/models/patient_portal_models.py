@@ -3,36 +3,26 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.breast_cancer_patient_models import BreastCancerPatientFeatures
+from app.models.breast_cancer_patient_models import Features as BreastCancerFeatures
 from app.models.pediatric_appendicitis_patient_models import (
-    PediatricAppendicitisPatientFeatures,
+    Features as PediatricAppendicitisFeatures,
 )
+from app.models.common_models import Timestamps
+from app.models.user_models import UserSummary
 
 
-class ClinicianInfo(BaseModel):
-    first_name: str = Field(..., example="John")
-    last_name: str = Field(..., example="Doe")
-    email: str = Field(..., example="user@example.com")
-
-
-class GetPatientPortalResponseBase(BaseModel):
-    created_at: datetime = Field(
-        ..., description="Timestamp when the patient info was created"
-    )
-    updated_at: datetime = Field(
-        ..., description="Timestamp when the patient info was last updated"
-    )
-    clinician: ClinicianInfo
+class GetPatientPortalResponseBase(Timestamps):
+    clinician_user_info: UserSummary
 
 
 class GetBreastCancerPatientPortalResponse(
-    GetPatientPortalResponseBase, BreastCancerPatientFeatures
+    GetPatientPortalResponseBase, BreastCancerFeatures
 ):
     diagnosis: Literal[0, 1] | None = None
 
 
 class GetPediatricAppendicitisPatientPortalResponse(
-    GetPatientPortalResponseBase, PediatricAppendicitisPatientFeatures
+    GetPatientPortalResponseBase, PediatricAppendicitisFeatures
 ):
     diagnosis: Literal["no appendicitis", "appendicitis"] | None = None
     management: Literal["conservative", "surgical"] | None = None

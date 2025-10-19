@@ -59,7 +59,6 @@ def login(
     response: Response,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-
     user = get_user_by_email(cursor, login_request.email)
 
     # Checks if the user exists
@@ -146,13 +145,12 @@ def refresh(
     "/logout",
     summary="Log a user out",
     description="Log a user out by clearing their refresh cookie",
-    response_model=ResponseModel[None],
-    response_description="Nothing much to see here",
-    status_code=status.HTTP_200_OK,
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 def logout(response: Response):
     clear_refresh_cookie(response)
-    return ResponseModel[None](detail="Logout successful")
+    return
 
 
 @router.get(
@@ -173,15 +171,7 @@ def logout(response: Response):
 def me(
     current_user: User = Depends(get_current_user),
 ):
-
     return ResponseModel[MeResponse](
-        data=MeResponse(
-            first_name=current_user.first_name,
-            last_name=current_user.last_name,
-            username=current_user.username,
-            email=current_user.email,
-            role=current_user.role,
-            condition=current_user.condition,
-        ),
+        data=MeResponse.model_validate(current_user),
         detail="Info retrieved successfully",
     )

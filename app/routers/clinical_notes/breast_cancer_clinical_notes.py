@@ -37,7 +37,6 @@ router = APIRouter(
 def validate_note_id(
     patient_id: int, note_id: int, cursor: MySQLCursorDict = Depends(get_db_cursor)
 ) -> ClinicalNote:
-
     clinical_note = get_breast_cancer_clinical_note_by_id(cursor, note_id)
     if clinical_note is None:
         raise HTTPException(
@@ -65,7 +64,6 @@ def get_clinical_notes(
     patient_id: int,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-
     operation = """
         SELECT *
         FROM breast_cancer_clinical_notes
@@ -118,7 +116,6 @@ def add_clinical_note(
     add_clinical_note_request: UpsertClinicalNoteRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-
     # Insert the new note
     operation = """
         INSERT INTO breast_cancer_clinical_notes (patient_id, content)
@@ -176,9 +173,8 @@ def update_clinical_note(
     dependencies=[Depends(validate_note_id)],
     summary="Delete clinical note",
     description="Delete a clinical note for a patient by the note's ID",
-    response_model=ResponseModel[None],
-    response_description="Nothing really",
-    status_code=status.HTTP_200_OK,
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": ResponseModel[None],
@@ -190,7 +186,6 @@ def delete_clinical_note(
     note_id: int,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-
     # Insert the new note
     operation = """
         DELETE FROM breast_cancer_clinical_notes
@@ -199,4 +194,4 @@ def delete_clinical_note(
     params = (note_id,)
     cursor.execute(operation, params)
 
-    return ResponseModel[None](data=None, detail="Successfully deleted clinical note")
+    return
