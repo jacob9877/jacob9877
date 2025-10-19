@@ -19,6 +19,14 @@ router = APIRouter(
             "model": ResponseModel[None],
             "description": "Error with provided access token",
         },
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to access the requested patient",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Requested patient doesn't exist",
+        },
     },
     dependencies=[Security(require_access(clinicians_only()))],
 )
@@ -27,7 +35,7 @@ router = APIRouter(
 @router.post(
     "",
     summary="Set diagnosis approval status",
-    description="Set or reset the status of the diagnosis approval",
+    description="Set or reset the status of the diagnosis approval. Only provide a value for the approvals you actually wish to modify. Setting an approval as null in the request body will actually reset the approval status to NULL",
     status_code=status.HTTP_204_NO_CONTENT,
     response_description="Nothing",
 )
@@ -36,25 +44,16 @@ def post_approval(
     patient: Patient = Depends(validate_breast_cancer_patient_id),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    approvals = approval_request.model_dump(exclude_unset=True)
-
-    if not approvals:
+    # Determine if diagnosis was actually set
+    if not approval_request.model_dump(exclude_unset=True):
         return
 
-    set_parts = []
-    params = []
-    for field, new_approval_status in approvals.items():
-        approval_status_column = f"{field}_approval_status"
-        set_parts.append(f"{approval_status_column}=%s")
-        params.append(new_approval_status)
-
-    set_clause = ",".join(set_parts)
-    operation = f"""
+    operation = """
         UPDATE breast_cancer_patients
-        SET {set_clause}
+        SET diagnosis_approval_status=%s
         WHERE id=%s
     """
-    params.append(patient.id)
+    params = (approval_request.diagnosis, patient.id)
     cursor.execute(operation, tuple(params))
 
     return
