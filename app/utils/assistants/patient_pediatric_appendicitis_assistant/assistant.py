@@ -1,9 +1,11 @@
-from app.models.conversation_models import AssistantSlug
+from app.models.conversation_models import AssistantSlug, Conversation
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.assistants.llm import llm
 
 
 class PatientPediatricAppendicitisAssistant(Assistant):
+    def __init__(self, conversation: Conversation) -> None:
+        self.conversation = conversation
 
     @property
     def assistant_name(self) -> AssistantSlug:
@@ -33,4 +35,3 @@ class PatientPediatricAppendicitisAssistant(Assistant):
         messages = [("system", prompt), ("human", message)]
         response = llm.invoke(messages)
         return response.content
-
