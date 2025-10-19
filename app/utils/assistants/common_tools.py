@@ -43,7 +43,6 @@ def get_clinical_trials(
     condition: str,
     overall_status: list[OverallStatusOptions] | None = None,
 ) -> list[dict]:
-
     # Default overall_status
     if overall_status is None:
         overall_status = ["NOT_YET_RECRUITING", "RECRUITING"]
@@ -95,7 +94,6 @@ class GetClinicalTrialByNCTIdInput(BaseModel):
     args_schema=GetClinicalTrialByNCTIdInput,
 )
 def get_clinical_trial_by_id(nct_id: str) -> dict:
-
     response = requests.get(
         f"https://clinicaltrials.gov/api/v2/studies/{nct_id}",
         allow_redirects=True,

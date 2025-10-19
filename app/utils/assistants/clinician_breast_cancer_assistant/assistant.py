@@ -16,7 +16,6 @@ from app.utils.db import get_db_connection_string
 
 
 class ClinicianBreastCancerAssistant(Assistant):
-
     def __init__(self, conversation: Conversation) -> None:
         self.conversation = conversation
 
@@ -70,7 +69,6 @@ class ClinicianBreastCancerAssistant(Assistant):
         config = self._build_config()
 
         with PyMySQLSaver.from_conn_string(get_db_connection_string()) as saver:
-
             agent = create_react_agent(
                 model=llm,
                 tools=[
@@ -100,7 +98,6 @@ class ClinicianBreastCancerAssistant(Assistant):
 
     @staticmethod
     def get_title(message: str) -> str:
-
         prompt = """
             You are an expert in creating concise but expressive titles.
             You will create titles for a chatbot where users can have multiple conversations.

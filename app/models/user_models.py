@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 from typing_extensions import Self

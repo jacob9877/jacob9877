@@ -40,7 +40,6 @@ def get_patient_info_for_user(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ) -> Patient:
-
     operation = """
         SELECT *
         FROM breast_cancer_patients

@@ -4,11 +4,9 @@ from typing import Literal
 
 from fastapi import (
     APIRouter,
-    Body,
     Depends,
     File,
     HTTPException,
-    Path,
     Query,
     Security,
     UploadFile,
@@ -17,11 +15,8 @@ from fastapi import (
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import (
-    DEMOGRAPHICS_NAMES,
     FEATURE_NAMES,
     AddPatientsRequest,
-    Demographics,
-    Features,
     GetPatientResponse,
     PaginatedPatients,
     UpsertPatientRequest,

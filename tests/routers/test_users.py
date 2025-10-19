@@ -7,13 +7,6 @@ import bcrypt
 import jwt
 
 from app.app import app
-from app.models.user_models import (
-    LoginRequest,
-    RegisterRequest,
-    PasswordResetRequest,
-    PasswordResetConfirm,
-)
-from app.models.common_models import ResponseModel
 
 SECRET_KEY = "testsecret"
 ALGORITHM = "HS256"
@@ -240,8 +233,9 @@ def test_reset_password_success(mock_db):
     conn.cursor.return_value = cursor
     mock_db.return_value = conn
 
-    with patch("app.routers.users.SECRET_KEY", SECRET_KEY), patch(
-        "app.routers.users.ALGORITHM", ALGORITHM
+    with (
+        patch("app.routers.users.SECRET_KEY", SECRET_KEY),
+        patch("app.routers.users.ALGORITHM", ALGORITHM),
     ):
         response = client.post(
             "/users/reset-password", json={"token": token, "new_password": "newpass"}
@@ -262,8 +256,9 @@ def test_reset_password_expired_token(mock_db):
         algorithm=ALGORITHM,
     )
 
-    with patch("app.routers.users.SECRET_KEY", SECRET_KEY), patch(
-        "app.routers.users.ALGORITHM", ALGORITHM
+    with (
+        patch("app.routers.users.SECRET_KEY", SECRET_KEY),
+        patch("app.routers.users.ALGORITHM", ALGORITHM),
     ):
         response = client.post(
             "/users/reset-password", json={"token": token, "new_password": "newpass"}
@@ -276,8 +271,9 @@ def test_reset_password_expired_token(mock_db):
 def test_reset_password_invalid_token(mock_db):
     token = "invalid.token.string"
 
-    with patch("app.routers.users.SECRET_KEY", SECRET_KEY), patch(
-        "app.routers.users.ALGORITHM", ALGORITHM
+    with (
+        patch("app.routers.users.SECRET_KEY", SECRET_KEY),
+        patch("app.routers.users.ALGORITHM", ALGORITHM),
     ):
         response = client.post(
             "/users/reset-password", json={"token": token, "new_password": "newpass"}

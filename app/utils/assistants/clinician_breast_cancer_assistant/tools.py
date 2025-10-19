@@ -9,7 +9,6 @@ from app.utils.db import get_breast_cancer_patient_by_id, get_db_cursor_cm
 
 
 class GetPatientInfoInput(BaseModel):
-
     patient_id: int = Field(
         ...,
         description="The integer ID (MySQL PK) of the breast cancer patient to retrieve information for",
@@ -22,7 +21,6 @@ class GetPatientInfoInput(BaseModel):
     args_schema=GetPatientInfoInput,
 )
 def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
-
     if config["configurable"].get("patient_id") and patient_id != config[
         "configurable"
     ].get("patient_id"):
@@ -50,7 +48,6 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
 
 
 class GetPatientExplanationInput(BaseModel):
-
     patient_id: int = Field(
         ...,
         description="The integer ID (MySQL PK) of the breast cancer patient to retrieve explanation for",
@@ -63,19 +60,16 @@ class GetPatientExplanationInput(BaseModel):
     args_schema=GetPatientExplanationInput,
 )
 def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
-
     # If the conversation is about a patient, make ture this tool call is about the same patient
     if config["configurable"].get("patient_id") and patient_id != config[
         "configurable"
     ].get("patient_id"):
-
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
         )
 
     with get_db_cursor_cm() as cursor:
-
         operation = """
             SELECT bce.explanation,
                 bcp.clinician_user_id

@@ -10,7 +10,6 @@ from app.utils.db import get_db_cursor_cm, get_pediatric_appendicitis_patient_by
 
 
 class GetPatientInfoInput(BaseModel):
-
     patient_id: int = Field(
         ...,
         description="The integer ID (MySQL PK) of the pediatric appendicitis patient to retrieve information for",
@@ -23,7 +22,6 @@ class GetPatientInfoInput(BaseModel):
     args_schema=GetPatientInfoInput,
 )
 def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
-
     if patient_id != config["configurable"].get("patient_id"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -49,7 +47,6 @@ def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
 
 
 class GetPatientExplanationInput(BaseModel):
-
     patient_id: int = Field(
         ...,
         description="The integer ID (MySQL PK) of the pediatric appendicitis patient to retrieve explanation for",
@@ -72,12 +69,10 @@ def explain_diagnosis(
     *,
     config: RunnableConfig,
 ) -> dict:
-
     # If the conversation is about a patient, make ture this tool call is about the same patient
     if config["configurable"].get("patient_id") and patient_id != config[
         "configurable"
     ].get("patient_id"):
-
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",

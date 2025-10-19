@@ -64,7 +64,6 @@ def chat(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     conversation = validate_conversation_id(
         request.conversation_id, cursor, current_user
     )
@@ -96,7 +95,6 @@ def get_chat_suggestions(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     # Verify access to the requested assistant
     if not has_access_to_assistant(
         current_user.role, current_user.condition, assistant

@@ -60,7 +60,6 @@ def start_conversation(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     # Verify access to the requested assistant
     if not has_access_to_assistant(
         current_user.role, current_user.condition, request.assistant
@@ -166,7 +165,6 @@ def get_user_conversations(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-
     where_clause = "user_id=%s"
     params = (current_user.id,)
     if assistant:

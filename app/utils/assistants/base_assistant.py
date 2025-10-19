@@ -4,7 +4,6 @@ from app.models.conversation_models import AssistantSlug
 
 
 class Assistant(ABC):
-
     @property
     @abstractmethod
     def assistant_name(self) -> AssistantSlug:

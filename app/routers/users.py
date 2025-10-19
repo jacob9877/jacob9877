@@ -202,7 +202,6 @@ def register(
 async def request_password_reset(
     data: PasswordResetRequest, cursor: MySQLCursorDict = Depends(get_db_cursor)
 ):
-
     cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
     user = cursor.fetchone()
 

@@ -67,7 +67,6 @@ def bulk_send_message_to_sqs(queue_url: str, messages: list[dict]) -> None:
 def create_presigned_url(
     bucket: str, key: str, expires_in_sec: int | None = 3600
 ) -> str:
-
     # Generate a presigned URL for the S3 object
     s3_client = boto3.client("s3")
     response = s3_client.generate_presigned_url(

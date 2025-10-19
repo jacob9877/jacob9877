@@ -2,7 +2,7 @@ from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.user_models import Condition, Role, RoleAndCondition, UserSummary
+from app.models.user_models import RoleAndCondition, UserSummary
 
 
 class TokenType(str, Enum):

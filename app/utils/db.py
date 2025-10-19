@@ -4,21 +4,17 @@ from contextlib import contextmanager
 from typing import Generator, Literal
 
 from dotenv import find_dotenv, load_dotenv
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from mysql.connector import pooling
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import (
     GetPatientResponse as GetBreastCancerPatientResponse,
 )
-from app.models.breast_cancer_patient_models import Patient as BreastCancerPatient
 from app.models.clinical_notes_models import ClinicalNote
 from app.models.conversation_models import Conversation
 from app.models.pediatric_appendicitis_patient_models import (
     GetPatientResponse as GetPediatricAppendicitisPatientResponse,
-)
-from app.models.pediatric_appendicitis_patient_models import (
-    Patient as PediatricAppendicitisPatient,
 )
 from app.models.user_models import Condition, User
 
@@ -259,7 +255,6 @@ def insert_pending_email(
         "breast_cancer_patients", "pediatric_appendicitis_patients"
     ],
 ):
-
     # First check if we can do the linking right away
     # If a patient user exists with this email, the patient is of the right discipline, and not associated with a doctor
     if target_patient_table == "breast_cancer_patients":

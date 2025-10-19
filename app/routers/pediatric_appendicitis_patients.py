@@ -13,7 +13,6 @@ from app.models.pediatric_appendicitis_patient_models import (
     GetPatientResponseWithImages,
     ImageResponse,
     PaginatedPatients,
-    Patient,
     PostImagesRequest,
     Predictions,
     PresignedUpload,
