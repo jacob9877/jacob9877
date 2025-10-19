@@ -623,7 +623,7 @@ def delete_patients(
     # Verify all IDs exist
     placeholders = ",".join(["%s"] * len(patient_ids))
     operation = f"""
-        SELECT id, user_id
+        SELECT id, clinician_user_id
         FROM pediatric_appendicitis_patients
         WHERE id IN ({placeholders})
     """
@@ -640,7 +640,9 @@ def delete_patients(
             detail=f"Patient IDs not found: {missing_ids}",
         )
 
-    forbidden_ids = [row["id"] for row in rows if row["user_id"] != current_user.id]
+    forbidden_ids = [
+        row["id"] for row in rows if row["clinician_user_id"] != current_user.id
+    ]
     if forbidden_ids:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
