@@ -1,16 +1,14 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from app.models.common_models import Timestamps
 
 
 class UpsertClinicalNoteRequest(BaseModel):
     content: str = Field(..., example="Patient is very cool.")
 
 
-class GetClinicalNoteResponse(UpsertClinicalNoteRequest):
+class GetClinicalNoteResponse(UpsertClinicalNoteRequest, Timestamps):
     id: int
-    created_at: datetime
-    updated_at: datetime
 
 
 class ClinicalNote(GetClinicalNoteResponse):

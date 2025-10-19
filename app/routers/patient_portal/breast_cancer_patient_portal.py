@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.breast_cancer_patient_models import (
+    DEMOGRAPHICS_NAMES,
     FEATURE_NAMES,
     Patient,
-    DEMOGRAPHICS_NAMES,
 )
 from app.models.clinical_notes_models import GetClinicalNoteResponse
 from app.models.common_models import ResponseModel
@@ -58,10 +58,11 @@ def get_patient_info_for_user(
 
 @router.get(
     "",
-    summary="Get breast cancer patient info",
-    description="Get feature and other information about the currently logged-in breast cancer patient",
+    summary="Main patient portal endpoint for breast cancer patients",
+    description="Get feature, prediction and other information about the currently logged-in breast cancer patient",
     response_model=ResponseModel[GetBreastCancerPatientPortalResponse],
-    response_description="The patient info plus some clinician information",
+    response_model_exclude_unset=True,  # Don't include predictions as null if not approved
+    response_description="The patient info, predictions approved by clinician, and some info about the clinician",
     status_code=status.HTTP_200_OK,
 )
 def get_current_patient_info(

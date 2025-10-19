@@ -59,10 +59,11 @@ def get_patient_info_for_user(
 
 @router.get(
     "",
-    summary="Get pediatric appendicitis patient info",
-    description="Get feature and other information about the currently logged-in pediatric appendicitis patient",
+    summary="Main patient portal endpoint for pediatric appendicitis patients",
+    description="Get feature, prediction and other information about the currently logged-in pediatric appendicitis patient",
     response_model=ResponseModel[GetPediatricAppendicitisPatientPortalResponse],
-    response_description="The patient info plus some clinician information",
+    response_model_exclude_unset=True,  # Don't include predictions as null if not approved
+    response_description="The patient info, predictions approved by clinician, and some info about the clinician",
     status_code=status.HTTP_200_OK,
 )
 def get_current_patient_info(
@@ -80,6 +81,7 @@ def get_current_patient_info(
     row = cursor.fetchone()
 
     patient_fields_to_include = FEATURE_NAMES + ["created_at", "updated_at"]
+    # Only include predictions approved by the clinician
     if patient.diagnosis_approval_status == "approved":
         patient_fields_to_include.append("diagnosis")
     if patient.management_approval_status == "approved":

@@ -369,7 +369,7 @@ def get_pediatric_appendicitis_patients_paginated(
         operation += """
             AND (
                 updated_at < %s
-                OR (updated_at = %s AND id < %s)
+                OR (updated_at = %s AND p.id < %s)
             )
         """
         params.extend([last_timestamp, last_timestamp, last_id])

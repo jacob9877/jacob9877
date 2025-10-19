@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
 from app.models.chat_models import Message
@@ -16,7 +16,7 @@ AssistantSlug = Literal[
 
 class ConversationSummary(BaseModel):
     id: int
-    title: str
+    title: str = Field(..., example="Inquries about Patient X")
     patient_id: int | None = None  # If the conversation is patient-specific
 
 

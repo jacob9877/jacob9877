@@ -3,7 +3,6 @@ import traceback
 from contextlib import contextmanager
 from typing import Generator, Literal
 
-from dotenv import find_dotenv, load_dotenv
 from fastapi import HTTPException, status
 from mysql.connector import pooling
 from mysql.connector.cursor import MySQLCursorDict
@@ -17,8 +16,6 @@ from app.models.pediatric_appendicitis_patient_models import (
     GetPatientResponse as GetPediatricAppendicitisPatientResponse,
 )
 from app.models.user_models import Condition, User
-
-load_dotenv(find_dotenv())
 
 DB_HOST = os.environ["DB_HOST"]
 DB_USER = os.environ["DB_USER"]

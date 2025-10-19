@@ -1,6 +1,5 @@
 import os
 
-from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -27,8 +26,6 @@ from app.routers.patient_portal import (
     breast_cancer_patient_portal,
     pediatric_appendicitis_patient_portal,
 )
-
-load_dotenv(find_dotenv(), override=True)
 
 app = FastAPI(
     root_path="/v2",  # root_path must match the API Gateway stage name

@@ -45,14 +45,6 @@ class FeaturesAndDemographics(Features, Demographics):
     pass
 
 
-class AddPatientsRequest(BaseModel):
-    """Only take in features for now when adding multiple"""
-
-    patients: list[Features] = Field(
-        ..., min_items=1, description="List of breast cancer patients to add"
-    )
-
-
 class UpsertPatientRequest(FeaturesAndDemographics):
     name: str | None = Field(
         default=None,
@@ -60,6 +52,12 @@ class UpsertPatientRequest(FeaturesAndDemographics):
         description="Optionally set a name/nickname for the patient, this will be overriden if the patient has an account",
     )
     email: EmailStr | None = Field(default=None, example="user@example.com")
+
+
+class AddPatientsRequest(BaseModel):
+    patients: list[UpsertPatientRequest] = Field(
+        ..., min_items=1, description="List of breast cancer patients to add"
+    )
 
 
 class Predictions(BaseModel):

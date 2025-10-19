@@ -2,14 +2,11 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from dotenv import find_dotenv, load_dotenv
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.models.auth_models import TokenPayload, TokenType
 from app.models.user_models import Condition, Role
-
-load_dotenv(find_dotenv(), override=True)
 
 JWT_ALGORITHM = os.environ["JWT_ALGORITHM"]
 JWT_SECRET = os.environ["JWT_SECRET"]

@@ -172,6 +172,6 @@ def me(
     current_user: User = Depends(get_current_user),
 ):
     return ResponseModel[MeResponse](
-        data=MeResponse.model_validate(current_user),
+        data=MeResponse.model_validate(current_user, from_attributes=True),
         detail="Info retrieved successfully",
     )

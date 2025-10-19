@@ -157,7 +157,7 @@ def add_patient(
     new_patient = _add_patients(
         cursor=cursor,
         clinician_user_id=current_user.id,
-        upsert_patient_requests=add_patient_request,
+        upsert_patient_requests=[add_patient_request],
     )[0]
 
     if add_patient_request.email:
@@ -355,7 +355,7 @@ def get_breast_cancer_patients_paginated(
         operation += """
             AND (
                 updated_at < %s
-                OR (updated_at = %s AND id < %s)
+                OR (updated_at = %s AND p.id < %s)
             )
         """
         params.extend([last_timestamp, last_timestamp, last_id])
@@ -425,7 +425,9 @@ def _update_and_repredict(
         SET {set_clause}
         WHERE id=%s
     """
-    params = tuple([new_diagnosis] + list(upsert_patient_request_json.values()))
+    params = tuple(
+        [new_diagnosis] + list(upsert_patient_request_json.values()) + [patient_id]
+    )
     cursor.execute(operation, params)
 
     updated_patient = get_breast_cancer_patient_by_id(

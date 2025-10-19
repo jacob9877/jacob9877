@@ -1,10 +1,7 @@
 import os
 
-from dotenv import load_dotenv
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema
 from pydantic import EmailStr
-
-load_dotenv()
 
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 

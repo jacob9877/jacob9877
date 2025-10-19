@@ -110,7 +110,7 @@ def validate_breast_cancer_patient_id(
     if patient.clinician_user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this patient's clinical notes",
+            detail="Not authorized to access this patient",
         )
 
     return patient
@@ -131,7 +131,7 @@ def validate_pediatric_appendicitis_patient_id(
     if patient.clinician_user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this patient's clinical notes",
+            detail="Not authorized to access this patient",
         )
 
     return patient
