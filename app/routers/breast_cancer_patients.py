@@ -241,17 +241,25 @@ def add_patients_csv(
 ):
     file.file.seek(0)
     content = file.file.read().decode("utf-8")
-    parsed_patients = parse_csv(content)
-    print(f"Parsed {len(parsed_patients)} patients from CSV.")
-
-    # Load into request class to validate there's at least 1 patient
-    upsert_patient_requests = [UpsertPatientRequest(**row) for row in parsed_patients]
+    upsert_patient_requests: list[UpsertPatientRequest] = parse_csv(
+        content=content, output_model=UpsertPatientRequest
+    )
 
     inserted_patients = _add_patients(
         cursor=cursor,
         clinician_user_id=current_user.id,
         upsert_patient_requests=upsert_patient_requests,
     )
+
+    for upsert_patient_request, inserted_patient in zip(
+        upsert_patient_requests, inserted_patients
+    ):
+        insert_pending_email(
+            cursor=cursor,
+            email=upsert_patient_request.email,
+            target_patient_id=inserted_patient.id,
+            target_patient_table="breast_cancer_patients",
+        )
 
     # Send the new patient info to SQS for explanation processing
     messages = [

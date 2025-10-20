@@ -2,22 +2,15 @@ import csv
 import io
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel
 
-from app.models.breast_cancer_patient_models import Features as BreastCancerFeatures
 
-
-def parse_csv(content: str) -> list[BreastCancerFeatures]:
+def parse_csv(content: str, output_model: BaseModel) -> list[BaseModel]:
     patients = []
     csv_reader = csv.DictReader(io.StringIO(content))
     for row in csv_reader:
         try:
-            patient = BreastCancerFeatures(
-                mean_radius=float(row["mean_radius"]),
-                mean_texture=float(row["mean_texture"]),
-                mean_perimeter=float(row["mean_perimeter"]),
-                mean_area=float(row["mean_area"]),
-                mean_smoothness=float(row["mean_smoothness"]),
-            )
+            patient = output_model(**row)
             patients.append(patient)
         except (ValueError, KeyError) as e:
             print("Error row:", row)
