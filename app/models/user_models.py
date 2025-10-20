@@ -20,9 +20,9 @@ class RoleAndCondition(BaseModel):
 
     @model_validator(mode="after")
     def validate_role_condition(self) -> Self:
-        if self.role == "clinician" and self.condition is not None:
+        if self.role == Role.CLINICIAN and self.condition is not None:
             raise ValueError("condition must be None/NULL when role is clinician")
-        if self.role == "patient" and self.condition is None:
+        if self.role == Role.PATIENT and self.condition is None:
             raise ValueError("condition must not be None/NULL when role is patient")
         return self
 

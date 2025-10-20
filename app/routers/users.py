@@ -80,23 +80,21 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
     if not bc_row and not pa_row:
         pass
         # Register them as independent of a doctor and with the requested discipline
-    elif bc_row and register_request.condition == Condition.BREAST_CANCER.value:
+    elif bc_row and register_request.condition == Condition.BREAST_CANCER:
         # Register them as breast cancer linked
         patient_id = bc_row["id"]
 
-    elif (
-        pa_row and register_request.condition == Condition.PEDIATRIC_APPENDICITIS.value
-    ):
+    elif pa_row and register_request.condition == Condition.PEDIATRIC_APPENDICITIS:
         # Register them as pediatric appendicitis linked
         patient_id = pa_row["id"]
     # Register them as the condition where their email is pending and linked to that patient record, ignore requested discipline
     else:
         if bc_row:
             patient_id = bc_row["id"]
-            new_condition = Condition.BREAST_CANCER.value
+            new_condition = Condition.BREAST_CANCER
         else:
             patient_id = pa_row["id"]
-            new_condition = Condition.PEDIATRIC_APPENDICITIS.value
+            new_condition = Condition.PEDIATRIC_APPENDICITIS
 
     # Insert user into database
     operation = """
@@ -109,7 +107,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
         register_request.email,
         hashed_pw,
         Role.PATIENT.value,
-        new_condition,
+        new_condition.value,
     )
     cursor.execute(operation, params)
     new_user_id = cursor.lastrowid
