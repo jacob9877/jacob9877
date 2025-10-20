@@ -208,6 +208,16 @@ def add_patients_json(
         upsert_patient_requests=upsert_patient_requests,
     )
 
+    for upsert_patient_request, inserted_patient in zip(
+        upsert_patient_requests, inserted_patients
+    ):
+        insert_pending_email(
+            cursor=cursor,
+            email=upsert_patient_request.email,
+            target_patient_id=inserted_patient.id,
+            target_patient_table="breast_cancer_patients",
+        )
+
     # Send the new patient info to SQS for explanation processing
     messages = [
         patient.model_dump(include=FEATURE_NAMES) | {"patient_id": patient.id}
