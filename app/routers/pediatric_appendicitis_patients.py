@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
-from app.models.common_models import ResponseModel
+from app.models.common_models import ResponseModel, SetPatientEmailRequest
 from app.models.pediatric_appendicitis_patient_models import (
     FEATURE_NAMES,
     Features,
@@ -660,4 +660,51 @@ def delete_patients(
     return ResponseModel[list[int]](
         data=patient_ids,
         detail=f"Deleted {len(patient_ids)} patients successfully",
+    )
+
+
+@router.post(
+    "/{patient_id}/email",
+    summary="Set a patient's email",
+    description="Set a patient's email. This will either set it as pending in the patient record or actually link the patient user account to it",
+    response_model=ResponseModel[GetPatientResponse],
+    response_description="The updated patient info",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to perform the requested action",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "Conflict when linking email",
+        },
+    },
+    dependencies=[
+        Depends(validate_pediatric_appendicitis_patient_id),
+    ],
+)
+def set_patient_email(
+    patient_id: int,
+    set_patient_email_request: SetPatientEmailRequest,
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
+):
+    insert_pending_email(
+        cursor=cursor,
+        email=set_patient_email_request.email,
+        target_patient_id=patient_id,
+        target_patient_table="pediatric_appendicitis_patients",
+    )
+
+    # Re-fetch the patient to get it with the updated email and potentially user information
+    inserted_patient = get_pediatric_appendicitis_patient_by_id(
+        cursor=cursor, patient_id=patient_id
+    )
+
+    return ResponseModel[GetPatientResponse](
+        data=inserted_patient, detail="Successfully assigned email"
     )

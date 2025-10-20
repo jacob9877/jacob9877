@@ -32,3 +32,7 @@ class PatientBase(Timestamps):
     user_id: int | None = None
     pending_email: EmailStr | None = Field(default=None, example="user@example.com")
     name: str | None = Field(default=None, example="John Doe")
+
+
+class SetPatientEmailRequest(BaseModel):
+    email: EmailStr = Field(..., example="user@example.com")

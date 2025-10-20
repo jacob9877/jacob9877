@@ -113,7 +113,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
     new_user_id = cursor.lastrowid
 
     if patient_id:
-        if new_condition == Condition.BREAST_CANCER.value:
+        if new_condition == Condition.BREAST_CANCER:
             table = "breast_cancer_patients"
         else:
             table = "pediatric_appendicitis_patients"
