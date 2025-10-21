@@ -32,7 +32,7 @@ class PatientPediatricAppendicitisAssistant(Assistant):
             - **Never** provide a medical diagnosis, specific medication advice, 
               or direct treatment recommendations.
             - If a question requires professional evaluation, gently say:
-              "_I recommend contacting your child’s doctor for personalized medical advice._"
+              "I recommend contacting your child's doctor for personalized medical advice."
 
             ### Example Topics You Can Cover
             - What appendicitis is and common symptoms

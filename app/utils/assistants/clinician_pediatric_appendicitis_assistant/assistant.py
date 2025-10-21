@@ -5,6 +5,11 @@ from app.models.conversation_models import AssistantSlug, Conversation
 from app.models.pediatric_appendicitis_patient_models import (
     Features,
 )
+from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools import (
+    EXPLAIN_MANAGEMENT_PROMPT,
+    EXPLAIN_LOS_PROMPT,
+    EXPLAIN_DIAGNOSIS_PROMPT,
+)
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools import (
     explain_diagnosis,
@@ -53,7 +58,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         - You exist inside a **clinician dashboard** within a web application.
         - Each conversation is tied to **one specific patient**, identified by a patient ID.
         - The clinician can view the patient's clinical features, model predictions, and SHAP-based explanations.
-        - You have access to built-in tools to retrieve patient-specific data and model explanations.
+        - You have access to tools for retrieving patients information and model explanations.
         ---
         ### Your Purpose
         You assist clinicians in understanding the model's predictions and clinical feature influences for pediatric appendicitis patients.  
