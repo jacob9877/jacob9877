@@ -118,7 +118,7 @@ def get_current_patient_clinical_notes(
     columns = list(GetClinicalNoteResponse.model_fields.keys())
     operation = f"""
         SELECT {" ,".join(columns)}
-        FROM breast_cancer_clinical_notes
+        FROM pediatric_appendicitis_clinical_notes
         WHERE patient_id = %s
         ORDER BY updated_at DESC, id DESC
     """
