@@ -68,6 +68,8 @@ You are explaining the **predicted length of hospital stay (LOS)** for a pediatr
 2. Use **Markdown** format with clear, concise bullet points and tables when helpful.
 3. Always provide interpretable, clinician-friendly language.
 """
+
+
 class GetPatientInfoInput(BaseModel):
     patient_id: int = Field(
         ...,
@@ -138,11 +140,20 @@ def explain_diagnosis(
         )
 
     explanation_column = f"{prediction}_explanation"
+    if prediction == "length_of_stay":
+        prediction_columns = [
+            "pap.length_of_stay_pred",
+            "pap.length_of_stay_pi_lower",
+            "pap.length_of_stay_pi_upper",
+        ]
+    else:
+        prediction_columns = [f"pap.{prediction}"]
 
     with get_db_cursor_cm() as cursor:
         operation = f"""
             SELECT pae.{explanation_column},
-                pap.clinician_user_id
+                pap.clinician_user_id,
+                {", ".join(prediction_columns)}
             FROM pediatric_appendicitis_explanations AS pae
             JOIN pediatric_appendicitis_patients AS pap
             ON pae.patient_id = pap.id
@@ -164,4 +175,5 @@ def explain_diagnosis(
             detail="User is not authorized to access this patient's data",
         )
 
-    return json.loads(row[explanation_column])
+    row.pop("clinician_user_id")
+    return json.loads(row)
