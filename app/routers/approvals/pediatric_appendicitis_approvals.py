@@ -37,7 +37,7 @@ router = APIRouter(
 @router.post(
     "",
     summary="Set prediction approval status",
-    description="Set or reset the status of a prediction approval. Only provide a value for the approvals you actually wish to modify. Setting an approval as null in the request body will actually reset the approval status to NULL",
+    description="Set or reset the status of a prediction approval. Only provide a value for the approvals you actually wish to modify. Setting an approval as null in the request body will actually reset the approval status to NULL. Valid values are 'approved', 'rejected', and null.",
     status_code=status.HTTP_204_NO_CONTENT,
     response_description="Nothing",
 )
