@@ -96,4 +96,5 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
         )
 
     row.pop("clinician_user_id")
-    return json.loads(row)
+    row["explanation"] = json.loads(row["explanation"])
+    return row

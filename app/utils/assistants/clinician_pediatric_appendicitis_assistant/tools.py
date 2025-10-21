@@ -176,4 +176,5 @@ def explain_diagnosis(
         )
 
     row.pop("clinician_user_id")
-    return json.loads(row)
+    row[explanation_column] = json.loads(row[explanation_column])
+    return row
