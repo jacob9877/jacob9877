@@ -5,11 +5,6 @@ from app.models.conversation_models import AssistantSlug, Conversation
 from app.models.pediatric_appendicitis_patient_models import (
     Features,
 )
-from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools import (
-    EXPLAIN_MANAGEMENT_PROMPT,
-    EXPLAIN_LOS_PROMPT,
-    EXPLAIN_DIAGNOSIS_PROMPT,
-)
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools import (
     EXPLAIN_DIAGNOSIS_PROMPT,

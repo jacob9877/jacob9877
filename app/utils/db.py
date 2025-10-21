@@ -24,7 +24,7 @@ DB_PORT = int(os.environ["DB_PORT"])
 DB_NAME = os.environ["DB_NAME"]
 
 POOL_NAME = os.getenv("DB_POOL_NAME", "main_pool")
-POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
+POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "3"))
 POOL_RESET = os.getenv("DB_POOL_RESET_SESSION", "True").lower() == "true"
 
 # Singleton, process-wide connection pool
