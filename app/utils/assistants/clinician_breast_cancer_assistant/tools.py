@@ -72,7 +72,8 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     with get_db_cursor_cm() as cursor:
         operation = """
             SELECT bce.explanation,
-                bcp.clinician_user_id
+                bcp.clinician_user_id,
+                bcp.diagnosis
             FROM breast_cancer_explanations AS bce
             JOIN breast_cancer_patients AS bcp
             ON bce.patient_id = bcp.id
@@ -94,4 +95,6 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
             detail="User is not authorized to access this patient's data",
         )
 
-    return json.loads(row["explanation"])
+    row.pop("clinician_user_id")
+    row["explanation"] = json.loads(row["explanation"])
+    return row

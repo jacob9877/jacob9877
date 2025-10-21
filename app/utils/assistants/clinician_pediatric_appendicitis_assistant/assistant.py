@@ -12,6 +12,9 @@ from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools impor
 )
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools import (
+    EXPLAIN_DIAGNOSIS_PROMPT,
+    EXPLAIN_LOS_PROMPT,
+    EXPLAIN_MANAGEMENT_PROMPT,
     explain_diagnosis,
     get_patient_info,
 )
@@ -46,10 +49,12 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
 
     def _get_system_prompt(self) -> str:
         # Dynamically build feature descriptions
-        feature_descriptions = "\n".join([
-            f"- **{name}**: {field.description or 'No description provided.'}"
-            for name, field in Features.model_fields.items()
-        ])
+        feature_descriptions = "\n".join(
+            [
+                f"- **{name}**: {field.description or 'No description provided.'}"
+                for name, field in Features.model_fields.items()
+            ]
+        )
         prompt = f"""
         You are a specialized AI assistant designed for **clinicians** using a predictive analytics platform focused on **pediatric appendicitis**.
         You must always respond using **Markdown formatting**.
@@ -64,25 +69,25 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         You assist clinicians in understanding the model's predictions and clinical feature influences for pediatric appendicitis patients.  
         The underlying model provides three types of outputs:
 
-        1. **Diagnosis** → `"Appendicitis"` or `"No appendicitis"`
-        2. **Management** → `"Conservative"` or `"Surgical"`
-        3. **Length of Stay (LOS)** → Numeric prediction in days with an **80% confidence interval**
+        1. **Diagnosis** -> `"Appendicitis"` or `"No appendicitis"`
+        2. **Management** -> `"Conservative"` or `"Surgical"`
+        3. **Length of Stay (LOS)** -> Numeric prediction in days with an **80% confidence interval**
 
         Your role is to clearly and concisely interpret these predictions using the provided data and explanations.
         ---
-        ###Feature Descriptions
+        ### Feature Descriptions
         {feature_descriptions}
         ---
-        ### 🔍 Explanation Guidance
+        ### Explanation Guidance
         Use the following guidance depending on which prediction you are explaining:
 
-        **For Diagnosis Explanations:**
+        ** For Diagnosis Explanations:**
         {EXPLAIN_DIAGNOSIS_PROMPT}
 
-        **For Management Explanations:**
+        ** For Management Explanations:**
         {EXPLAIN_MANAGEMENT_PROMPT}
 
-        **For Length of Stay (LOS) Explanations:**
+        ** For Length of Stay (LOS) Explanations:**
         {EXPLAIN_LOS_PROMPT}
 
         ---
