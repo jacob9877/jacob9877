@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 from app.models.user_models import RoleAndCondition, UserSummary
 
@@ -18,8 +18,8 @@ class TokenPayload(RoleAndCondition):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(..., example="user@example.com")
-    password: str = Field(..., example="password123")
+    email: EmailStr
+    password: str
 
 
 class LoginResponse(BaseModel):

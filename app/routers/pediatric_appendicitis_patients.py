@@ -182,8 +182,8 @@ def add_patient(
     current_user: User = Depends(get_current_user),
 ):
     image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
-        for upload_id in add_patient_request.image_upload_ids
+        _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
+        for image_upload in add_patient_request.image_uploads
     ]
 
     body = {
@@ -230,7 +230,7 @@ def add_patient(
         WHERE patient_id = %s
     """
     params = (new_patient.id,)
-    cursor.execute()
+    cursor.execute(operation, params)
     image_rows = cursor.fetchall()
     images = []
     for image_row, image_s3_uri in zip(image_rows, image_s3_uris):
@@ -516,10 +516,12 @@ def update_patient(
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
 ):
-    image_upload_ids = update_patient_request.image_upload_ids or []
-
     # If the user provided images
-    if image_upload_ids:
+    if update_patient_request.image_uploads:
+        image_upload_ids = [
+            image_upload.upload_id
+            for image_upload in update_patient_request.image_uploads
+        ]
         # Delete all images except those images
         placeholders = ",".join(["%s"] * len(image_upload_ids))
         operation = f"""
@@ -539,8 +541,8 @@ def update_patient(
         cursor.execute(operation, params)
 
     image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
-        for upload_id in image_upload_ids
+        _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
+        for image_upload in update_patient_request.image_uploads
     ]
 
     body = {
@@ -587,7 +589,7 @@ def update_patient(
         WHERE patient_id = %s
     """
     params = (new_patient.id,)
-    cursor.execute()
+    cursor.execute(operation, params)
     image_rows = cursor.fetchall()
     images = []
     for image_row, image_s3_uri in zip(image_rows, image_s3_uris):
