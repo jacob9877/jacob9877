@@ -566,17 +566,16 @@ def update_patient(
             target_patient_table="pediatric_appendicitis_patients",
         )
 
-    if image_upload_ids:
+    for image_upload in update_patient_request.image_uploads:
         # Update the images to link them to the new patient
-        placeholders = ", ".join(["%s"] * len(image_upload_ids))
-        operation = f"""
+        operation = """
             UPDATE pediatric_appendicitis_images
-            SET patient_id = %s
-            WHERE upload_id IN ({placeholders}) AND user_id = %s
+            SET name = %s
+            WHERE upload_id = %s AND user_id = %s
         """
         params = (
-            new_patient.id,
-            *image_upload_ids,
+            image_upload.name,
+            image_upload.upload_id,
             current_user.id,
         )
         cursor.execute(operation, params)

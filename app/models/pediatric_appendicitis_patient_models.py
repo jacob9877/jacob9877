@@ -267,7 +267,7 @@ class Features(BaseModel):
     @classmethod
     def calculate_scores(cls, data: Any) -> Any:
         data["BMI"] = data["Weight"] / (data["Height"] / 100)
-        data["Neutrophilia"] = calculate_neutrophilia(data["Neutrophils_Percentage"])
+        data["Neutrophilia"] = calculate_neutrophilia(data["Neutrophil_Percentage"])
         data["Alvarado_Score"] = calculate_alvarado_score(data)
         data["Paedriatic_Appendicitis_Score"] = calculate_pediatric_appendicits_score(
             data
