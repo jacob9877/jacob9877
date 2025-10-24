@@ -572,10 +572,11 @@ def update_patient(
         # Update the images to link them to the new patient
         operation = """
             UPDATE pediatric_appendicitis_images
-            SET name = %s
+            SET patient_id = %s, name = %s
             WHERE upload_id = %s AND user_id = %s
         """
         params = (
+            patient_id,
             image_upload.name,
             image_upload.upload_id,
             current_user.id,
