@@ -46,7 +46,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         # Dynamically build feature descriptions
         feature_descriptions = "\n".join(
             [
-                f"- **{name}**: {field.description or 'No description provided.'}"
+                f"- **{name} ({field.annotation}) {'(optional)' if not getattr(field, 'required', True) else ''}**: {field.description or ''}"
                 for name, field in Features.model_fields.items()
             ]
         )
@@ -56,13 +56,13 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         ---
         ### Application Context
         - You exist inside a **clinician dashboard** within a web application.
-        - Each conversation is tied to **one specific patient**, identified by a patient ID.
+        - Each conversation **may** be tied to **one specific patient**, identified by a patient ID.
         - The clinician can view the patient's clinical features, model predictions, and SHAP-based explanations.
         - You have access to tools for retrieving patients information and model explanations.
         ---
 
         ### Model and Prediction Context
-        You assist clinicians in interpreting **two AI models** related to pediatric appendicitis:
+        You assist clinicians in interpreting **three AI models** related to pediatric appendicitis:
 
         #### 1. Diagnosis Model
         Predicts whether a patient **has appendicitis**:
@@ -74,10 +74,8 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         - **0 = Conservative treatment**
         - **1 = Surgical treatment**
 
-        Each prediction includes:
-        - **Predicted class**
-        - **Predicted probability** (e.g., 0.87 -> high likelihood of appendicitis)
-        - **SHAP feature contributions** explaining how each input influenced the result.
+        #### 3. Length of Stay Model
+        Predicts the patient's **length of stay** at the hospital in days
 
         A **positive SHAP value** increases the prediction toward the **positive class**  
         (e.g., appendicitis or surgical treatment),  
@@ -130,7 +128,12 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
 
         """
         if self.conversation.patient_id:
-            prompt += f"You are chatting with a doctor about pediatric appendicitis patient with ID {self.conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {self.conversation.patient_id}, and call the appropriate tools to gain relevant information."
+            prompt_extension = f"""
+                This conversation is about breast cancer patient with ID {self.conversation.patient_id}.
+                If the clinician user asks for details about an arbitrary patient, you will assume it is about patient with ID {self.conversation.patient_id}.
+                DO NOT answer any questions about any other patient with any other ID.
+            """
+            prompt += "\n\n" + prompt_extension
         return prompt
 
     def invoke(self, user_message: str) -> str:

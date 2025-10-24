@@ -8,6 +8,7 @@ from mysql.connector.cursor import MySQLCursorDict
 from app.models.common_models import ResponseModel, SetPatientEmailRequest
 from app.models.pediatric_appendicitis_patient_models import (
     FEATURE_NAMES,
+    Approvals,
     Features,
     GetPatientResponse,
     GetPatientResponseWithImages,
@@ -199,17 +200,17 @@ def add_patient(
         predictions=predictions,
     )
 
-    if add_patient_request.image_upload_ids:
+    for image_upload in add_patient_request.image_uploads:
         # Update the images to link them to the new patient
-        placeholders = ", ".join(["%s"] * len(add_patient_request.image_upload_ids))
-        operation = f"""
+        operation = """
             UPDATE pediatric_appendicitis_images
-            SET patient_id = %s
-            WHERE upload_id IN ({placeholders}) AND user_id = %s
+            SET patient_id = %s, name = %s
+            WHERE upload_id = %s AND user_id = %s
         """
         params = (
             new_patient.id,
-            *add_patient_request.image_upload_ids,
+            image_upload.name,
+            image_upload.upload_id,
             current_user.id,
         )
         cursor.execute(operation, params)
@@ -222,12 +223,19 @@ def add_patient(
             target_patient_table="pediatric_appendicitis_patients",
         )
 
-    images: list[ImageResponse] = []
-    for upload_id, image_s3_uri in zip(
-        add_patient_request.image_upload_ids, image_s3_uris
-    ):
+    # Package the images nicely to return
+    operation = """
+        SELECT upload_id, name, created_at
+        FROM pediatric_appendicitis_images
+        WHERE patient_id = %s
+    """
+    params = (new_patient.id,)
+    cursor.execute()
+    image_rows = cursor.fetchall()
+    images = []
+    for image_row, image_s3_uri in zip(image_rows, image_s3_uris):
         presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
-        images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
+        images.append(ImageResponse(**image_row, url=presigned_url))
 
     patient_with_images = GetPatientResponseWithImages(
         **new_patient.model_dump(), images=images
@@ -278,7 +286,7 @@ def get_patient(
 ):
     # Fetch any images associated with the patient
     operation = """
-        SELECT upload_id, file_type
+        SELECT upload_id, file_type, name, created_at
         FROM pediatric_appendicitis_images
         WHERE patient_id=%s
     """
@@ -291,7 +299,7 @@ def get_patient(
     for row in rows:
         s3_key = build_s3_image_key(current_user.id, row["upload_id"], row["file_type"])
         presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
-        images.append(ImageResponse(upload_id=row["upload_id"], url=presigned_url))
+        images.append(ImageResponse(**row, url=presigned_url))
 
     patient_with_images = GetPatientResponseWithImages(
         **patient.model_dump(), images=images
@@ -462,24 +470,20 @@ def _update_patient(
     predictions: Predictions,
 ) -> GetPatientResponse:
     predictions_keys = list(Predictions.model_fields.keys())
-    columns = [
-        "name",
-        *FEATURE_NAMES,
-        *predictions_keys,
-    ]
+    approvals_keys = list(Approvals.model_fields.keys())
+    columns = ["name", *FEATURE_NAMES, *predictions_keys, *approvals_keys]
     set_clause = ", ".join(f"{column}=%s" for column in columns)
     operation = f"""
         UPDATE pediatric_appendicitis_patients
         SET {set_clause}
         WHERE id=%s
     """
-    params = (
-        (name,)
-        + tuple(getattr(features, name) for name in FEATURE_NAMES)
-        + tuple(
-            getattr(predictions, prediction_key) for prediction_key in predictions_keys
-        )
-        + (patient_id,)
+    params = tuple(
+        [name]
+        + [getattr(features, name) for name in FEATURE_NAMES]
+        + [getattr(predictions, prediction_key) for prediction_key in predictions_keys]
+        + ([None] * len(approvals_keys))
+        + [patient_id]
     )
     cursor.execute(operation, params)
 
@@ -577,10 +581,19 @@ def update_patient(
         )
         cursor.execute(operation, params)
 
-    images: list[ImageResponse] = []
-    for upload_id, image_s3_uri in zip(image_upload_ids, image_s3_uris):
+    # Package the images nicely to return
+    operation = """
+        SELECT upload_id, name, created_at
+        FROM pediatric_appendicitis_images
+        WHERE patient_id = %s
+    """
+    params = (new_patient.id,)
+    cursor.execute()
+    image_rows = cursor.fetchall()
+    images = []
+    for image_row, image_s3_uri in zip(image_rows, image_s3_uris):
         presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
-        images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
+        images.append(ImageResponse(**image_row, url=presigned_url))
 
     patient_with_images = GetPatientResponseWithImages(
         **new_patient.model_dump(), images=images
@@ -667,8 +680,8 @@ def delete_patients(
     "/{patient_id}/email",
     summary="Set a patient's email",
     description="Set a patient's email. This will either set it as pending in the patient record or actually link the patient user account to it",
-    response_model=ResponseModel[GetPatientResponse],
-    response_description="The updated patient info",
+    response_model=ResponseModel[GetPatientResponseWithImages],
+    response_description="The updated patient info with images",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
@@ -692,6 +705,7 @@ def set_patient_email(
     patient_id: int,
     set_patient_email_request: SetPatientEmailRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
+    current_user: User = Depends(get_current_user),
 ):
     insert_pending_email(
         cursor=cursor,
@@ -705,6 +719,27 @@ def set_patient_email(
         cursor=cursor, patient_id=patient_id
     )
 
-    return ResponseModel[GetPatientResponse](
-        data=inserted_patient, detail="Successfully assigned email"
+    # Fetch any images associated with the patient
+    operation = """
+        SELECT upload_id, file_type, name, created_at
+        FROM pediatric_appendicitis_images
+        WHERE patient_id=%s
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    rows = cursor.fetchall()
+
+    # Build upload_id, pre-signed url pairs for each image
+    images: list[ImageResponse] = []
+    for row in rows:
+        s3_key = build_s3_image_key(current_user.id, row["upload_id"], row["file_type"])
+        presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
+        images.append(ImageResponse(**row, url=presigned_url))
+
+    patient_with_images = GetPatientResponseWithImages(
+        **inserted_patient.model_dump(), images=images
+    )
+
+    return ResponseModel[GetPatientResponseWithImages](
+        data=patient_with_images, detail="Successfully assigned email"
     )

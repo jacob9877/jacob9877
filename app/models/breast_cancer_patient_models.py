@@ -8,13 +8,46 @@ from app.models.user_models import UserSummary
 
 
 class Features(BaseModel):
-    """Features that feed into the breast cancer diagnosis prediction"""
+    mean_radius: float = Field(
+        ...,
+        gt=0,
+        example=13.54,
+        description="The radius of an individual nucleus is measured by averaging the length of the radial line segments defined by the centroid of the snake and the individual snake points around the nucleus. Measured in pixels.",
+    )
+    mean_texture: float = Field(
+        ...,
+        gt=0,
+        example=14.36,
+        description="The texture of cell nucleus is measured by finding the variance of the gray scale intensities in the component pixels. Measured in gray-level intensity.",
+    )
+    mean_perimeter: float = Field(
+        ...,
+        gt=0,
+        example=87.46,
+        description="The nuclear perimeter of a cell nucleus is the total distance between the snake points. Measured in pixels.",
+    )
+    mean_area: float = Field(
+        ...,
+        gt=0,
+        example=566.3,
+        description="Nuclear area is measured simply by counting the number of pixels on the interior of the snake and adding one-half of the pixels in the perimeter. Measured in pixels squared.",
+    )
+    mean_smoothness: float = Field(
+        ...,
+        gt=0,
+        example=0.09779,
+        description="The smoothness of a nuclear contour is quantified by measuring the difference between the length of the radial line and the mean length of the lines surrounding it. Dimensionless quantity.",
+    )
 
-    mean_radius: float = Field(..., gt=0, example=13.54)
-    mean_texture: float = Field(..., gt=0, example=14.36)
-    mean_perimeter: float = Field(..., gt=0, example=87.46)
-    mean_area: float = Field(..., gt=0, example=566.3)
-    mean_smoothness: float = Field(..., gt=0, example=0.09779)
+    model_config = {
+        "title": "Breast Cancer Predictive Features",
+        "description": """
+            These measurements are obtained from a fine needle aspirate (FNA) of a breast mass, where a thin needle is used to extract cells from the tumor.
+            The cells are then placed on a microscope slide, stained, and imaged.
+            Using computer-aided image analysis, the boundaries of individual cell nuclei are segmented, and these quantitative features are computed.
+            Each of these features are a mean value, meaning the quantity is measured for all nuclei present in the image, and then the average is taken.
+        """,
+    }
 
 
 FEATURE_NAMES = list(Features.model_fields.keys())
