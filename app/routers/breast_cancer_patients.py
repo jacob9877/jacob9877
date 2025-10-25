@@ -228,14 +228,15 @@ async def add_patients_json(
     for upsert_patient_request, inserted_patient in zip(
         upsert_patient_requests, inserted_patients
     ):
-        await insert_pending_email(
-            cursor=cursor,
-            email=upsert_patient_request.email,
-            target_patient_id=inserted_patient.id,
-            target_patient_table="breast_cancer_patients",
-            clinician_first_name=current_user.first_name,
-            clinician_last_name=current_user.last_name,
-        )
+        if upsert_patient_request.email:
+            await insert_pending_email(
+                cursor=cursor,
+                email=upsert_patient_request.email,
+                target_patient_id=inserted_patient.id,
+                target_patient_table="breast_cancer_patients",
+                clinician_first_name=current_user.first_name,
+                clinician_last_name=current_user.last_name,
+            )
 
     # Send the new patient info to SQS for explanation processing
     messages = [
@@ -292,14 +293,15 @@ async def add_patients_csv(
     for upsert_patient_request, inserted_patient in zip(
         upsert_patient_requests, inserted_patients
     ):
-        await insert_pending_email(
-            cursor=cursor,
-            email=upsert_patient_request.email,
-            target_patient_id=inserted_patient.id,
-            target_patient_table="breast_cancer_patients",
-            clinician_first_name=current_user.first_name,
-            clinician_last_name=current_user.last_name,
-        )
+        if upsert_patient_request.email:
+            await insert_pending_email(
+                cursor=cursor,
+                email=upsert_patient_request.email,
+                target_patient_id=inserted_patient.id,
+                target_patient_table="breast_cancer_patients",
+                clinician_first_name=current_user.first_name,
+                clinician_last_name=current_user.last_name,
+            )
 
     # Send the new patient info to SQS for explanation processing
     messages = [
