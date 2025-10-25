@@ -73,7 +73,7 @@ def start_conversation(
     if request.patient_id is not None:
         if request.assistant == "clinician-breast-cancer":
             validate_breast_cancer_patient_id(request.patient_id, cursor, current_user)
-        else:
+        elif request.assistant == "clinician-pediatric-appendicitis":
             validate_pediatric_appendicitis_patient_id(
                 request.patient_id, cursor, current_user
             )
