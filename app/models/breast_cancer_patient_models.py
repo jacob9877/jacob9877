@@ -39,16 +39,6 @@ class Features(BaseModel):
         description="The smoothness of a nuclear contour is quantified by measuring the difference between the length of the radial line and the mean length of the lines surrounding it. Dimensionless quantity.",
     )
 
-    model_config = {
-        "title": "Breast Cancer Predictive Features",
-        "description": """
-            These measurements are obtained from a fine needle aspirate (FNA) of a breast mass, where a thin needle is used to extract cells from the tumor.
-            The cells are then placed on a microscope slide, stained, and imaged.
-            Using computer-aided image analysis, the boundaries of individual cell nuclei are segmented, and these quantitative features are computed.
-            Each of these features are a mean value, meaning the quantity is measured for all nuclei present in the image, and then the average is taken.
-        """,
-    }
-
 
 FEATURE_NAMES = list(Features.model_fields.keys())
 

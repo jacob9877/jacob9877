@@ -98,3 +98,97 @@ def explain_diagnosis(patient_id: int, *, config: RunnableConfig) -> dict:
     row.pop("clinician_user_id")
     row["explanation"] = json.loads(row["explanation"])
     return row
+
+
+class GetPatientsForAttributes(BaseModel):
+    name: str | None = Field(
+        default=None,
+        description="Patient nickname",
+        example="John Doe",
+    )
+
+    first_name: str | None = Field(
+        default=None, description="Patient's first name", example="John"
+    )
+
+    last_name: str | None = Field(
+        default=None, description="Patient's first name", example="Doe"
+    )
+
+    email: str | None = Field(default=None, description="johndoe@example.com")
+
+
+@tool(
+    description=(
+        "Get a subset of information about patients that satisfy the attributes. "
+        "Use to retrieve patient IDs a clinician is looking for. All attributes are optional. "
+        "If none are provided however, raises an error."
+    ),
+    args_schema=GetPatientsForAttributes,
+)
+def get_patients_for_attributes(
+    name: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    email: str | None = None,
+    *,
+    config: RunnableConfig,
+) -> list[dict]:
+    clinician_user_id = config["configurable"].get("user_id")
+
+    if name is None:
+        name = ""
+        if first_name:
+            name += first_name
+        if last_name:
+            name += last_name
+
+    operation = """
+        SELECT
+            p.id,
+            p.name,
+            CASE
+                WHEN p.user_id IS NULL THEN NULL
+                ELSE CAST(JSON_OBJECT(
+                    'first_name', u.first_name,
+                    'last_name',  u.last_name,
+                    'email',      u.email
+                ) AS JSON)
+            END AS patient_user_info
+        FROM breast_cancer_patients AS p
+        LEFT JOIN users AS u
+            ON u.id = p.user_id
+        WHERE p.clinician_user_id = %s
+    """
+    params: tuple = (clinician_user_id,)
+
+    ors = []
+    if name:
+        ors.append("LOWER(p.name) LIKE CONCAT(LOWER(%s), '%%')")
+        params += (name,)
+    if first_name:
+        ors.append(
+            "(p.user_id IS NOT NULL AND LOWER(u.first_name) LIKE CONCAT(LOWER(%s), '%%'))"
+        )
+        params += (first_name,)
+    if last_name:
+        ors.append(
+            "(p.user_id IS NOT NULL AND LOWER(u.last_name) LIKE CONCAT('%%', LOWER(%s)))"
+        )
+        params += (last_name,)
+    if email:
+        ors.append(
+            "(p.user_id IS NOT NULL AND LOWER(u.email) LIKE CONCAT(LOWER(%s), '%%'))"
+        )
+        params += (email,)
+
+    if ors:
+        operation += " AND (" + " OR ".join(ors) + ")"
+
+    operation += " ORDER BY p.id"
+
+    with get_db_cursor_cm() as cursor:
+        cursor.execute(operation, params)
+        rows = cursor.fetchall()
+
+    return rows

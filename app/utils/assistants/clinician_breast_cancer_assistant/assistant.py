@@ -7,6 +7,7 @@ from app.utils.assistants.base_assistant import Assistant
 from app.utils.assistants.clinician_breast_cancer_assistant.tools import (
     explain_diagnosis,
     get_patient_info,
+    get_patients_for_attributes,
 )
 from app.utils.assistants.common_tools import (
     get_clinical_trial_by_id,
@@ -39,7 +40,6 @@ class ClinicianBreastCancerAssistant(Assistant):
 
     def _get_system_prompt(self) -> str:
         # Dynamically build feature descriptions
-        feature_model_description = Features.model_json_schema()["description"]
         feature_descriptions = "\n".join(
             [
                 f"- **{name} ({field.annotation})**: {field.description or ''}"
@@ -75,7 +75,10 @@ class ClinicianBreastCancerAssistant(Assistant):
         ---
         ### Feature Descriptions
         The model predicts on the following features.
-        {feature_model_description}
+        These measurements are obtained from a fine needle aspirate (FNA) of a breast mass, where a thin needle is used to extract cells from the tumor.
+        The cells are then placed on a microscope slide, stained, and imaged.
+        Using computer-aided image analysis, the boundaries of individual cell nuclei are segmented, and these quantitative features are computed.
+        Each of these features are a mean value, meaning the quantity is measured for all nuclei present in the image, and then the average is taken.
         {feature_descriptions}
 
         ---
@@ -125,6 +128,7 @@ class ClinicianBreastCancerAssistant(Assistant):
                     get_patient_info,
                     get_clinical_trials,
                     get_clinical_trial_by_id,
+                    get_patients_for_attributes,
                 ],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,
