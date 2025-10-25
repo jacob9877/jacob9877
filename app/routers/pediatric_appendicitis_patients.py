@@ -514,6 +514,7 @@ def _update_patient(
             "description": "Email is invalid due to data circumstances",
         },
     },
+    dependencies=[Depends(validate_pediatric_appendicitis_patient_id)],
 )
 async def update_patient(
     patient_id: int,
