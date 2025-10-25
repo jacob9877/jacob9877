@@ -15,7 +15,8 @@ from app.models.conversation_models import Conversation
 from app.models.pediatric_appendicitis_patient_models import (
     GetPatientResponse as GetPediatricAppendicitisPatientResponse,
 )
-from app.models.user_models import Condition, User
+from app.models.user_models import Condition, Role, RoleAndCondition, User
+from app.utils.email_utils import send_registration_email
 
 DB_HOST = os.environ["DB_HOST"]
 DB_USER = os.environ["DB_USER"]
@@ -244,13 +245,15 @@ def get_pediatric_appendicitis_clinical_note_by_id(
     return ClinicalNote(**row)
 
 
-def insert_pending_email(
+async def insert_pending_email(
     cursor: MySQLCursorDict,
     email: str,
     target_patient_id: int,
     target_patient_table: Literal[
         "breast_cancer_patients", "pediatric_appendicitis_patients"
     ],
+    clinician_first_name: str,
+    clinician_last_name: str,
 ):
     """
     Core functionality for logic surrounding linking of patient user accounts to patient records.
@@ -268,10 +271,26 @@ def insert_pending_email(
         HTTPException: with status code 409 conflict if there is a data conflict given the arguments
     """
 
+    # Search for if the patient record already has a patient user associated with it
+    operation = f"""
+        SELECT user_id
+        FROM {target_patient_table}
+        WHERE id = %s
+    """
+    params = (target_patient_id,)
+    cursor.execute(operation, params)
+    row = cursor.fetchone()
+    if row and row["user_id"]:
+        # Policy: don't disrupt or override the currently linked patient user account
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Patient record already has a user account tied to it",
+        )
+
     if target_patient_table == "breast_cancer_patients":
-        condition = Condition.BREAST_CANCER.value
+        condition = Condition.BREAST_CANCER
     elif target_patient_table == "pediatric_appendicitis_patients":
-        condition = Condition.PEDIATRIC_APPENDICITIS.value
+        condition = Condition.PEDIATRIC_APPENDICITIS
     else:
         raise ValueError("Invalid target_patient_table")
 
@@ -287,7 +306,7 @@ def insert_pending_email(
             WHERE p.user_id = u.id
         );
     """
-    params = (condition, email)
+    params = (condition.value, email)
     cursor.execute(operation, params)
     row = cursor.fetchone()
     # If there is a user account that satisfies this
@@ -335,7 +354,7 @@ def insert_pending_email(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email is already pending in another patient",
             )
-        # Otherwise the email is pending in the same patient record and this is a re-insert - that's ok
+        # Otherwise the email is pending in the same patient record and this is a re-insert - keep going
 
     # Check if a user account exists with this email:
     #   - Check for a user with the email
@@ -374,20 +393,25 @@ def insert_pending_email(
             target_patient_table == "pediatric_appendicitis_patients"
             and row["condition"] != Condition.PEDIATRIC_APPENDICITIS.value
         ):
-            # We won't force-link across conditions
+            # Policy: we won't force-link across conditions
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Email is already taken by a user with a different condition",
             )
 
         # Otherwise, the existing user account has the same discipline.
-        # If the existing user account is already linked to a patient record
+        # If the existing user account is already linked to a different patient record
         if row["patient_id"] != target_patient_id:
             # There's nothing we can do
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="User already exists with this email and is already linked to a different patient record",
             )
+        # Otherwise, it's the same patient record
+        else:
+            # So the email is already linked
+            print("returning")
+            return
 
     # Now we should be good to go
     operation = f"""
@@ -398,4 +422,9 @@ def insert_pending_email(
     params = (email, target_patient_id)
     cursor.execute(operation, params)
 
-    # Send email here
+    await send_registration_email(
+        email,
+        clinician_first_name,
+        clinician_last_name,
+        RoleAndCondition(role=Role.PATIENT, condition=condition),
+    )

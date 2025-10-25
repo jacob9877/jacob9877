@@ -40,9 +40,9 @@ router = APIRouter(
 @router.post(
     "",
     summary="Create a conversation",
-    description="",
+    description="TODO",
     response_model=ResponseModel[StartConversationResponse],
-    response_description="ID of the newly created conversation and the title",
+    response_description="New conversation info",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_403_FORBIDDEN: {
@@ -155,7 +155,7 @@ def get_conversation(
     summary="Get conversation summaries for the logged-in user",
     description="Retrieves all conversations for the current user (by the provided access token), sorted by the most recently updated",
     response_model=ResponseModel[list[ConversationSummary]],
-    response_description="Returns all conversations, sorted by most recently updated",
+    response_description="Conversations sorted by updated_at descending",
     status_code=status.HTTP_200_OK,
 )
 def get_user_conversations(

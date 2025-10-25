@@ -132,5 +132,3 @@ def s3_file_exists(bucket: str, key: str):
             # Handle other potential errors (e.g., permissions)
             print(f"An error occurred: {e}")
             raise
-            raise
-            raise

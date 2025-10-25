@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.models.user_models import RoleAndCondition, UserSummary
 
@@ -18,7 +18,9 @@ class TokenPayload(RoleAndCondition):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr = Field(
+        ..., example=""
+    )  # Explicitly set empty string because it makes it easier to log in on the OpenAPI docs
     password: str
 
 
