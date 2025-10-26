@@ -137,7 +137,17 @@ def get_patients_for_attributes(
 ) -> list[dict]:
     clinician_user_id = config["configurable"]["user_id"]
 
-    # If name isn't provided, fall back to concatenation of first/last (searches p.name)
+    # BOOLEAN MODE: require tokens, allow prefix (+token*)
+    def to_boolean_prefix_query(s: str) -> str:
+        if not s:
+            return ""
+        terms = re.findall(r"[0-9A-Za-z\u00C0-\u017F'-]+", s)
+        terms = [t for t in terms if t]
+        if not terms:
+            return ""
+        return " ".join(f"+{t}*" for t in terms)
+
+    # Fall back: combine first/last if name not provided (still useful for p.name)
     if not name:
         parts: list[str] = []
         if first_name:
@@ -146,21 +156,19 @@ def get_patients_for_attributes(
             parts.append(last_name)
         name = " ".join(parts) if parts else None
 
-    # BOOLEAN MODE query allowing prefix matches (tokens optional).
-    # Sanitize by extracting alphanumeric terms only, to avoid '@', '.', '+', etc.
-    def to_boolean_prefix_query(s: str) -> str:
-        if not s:
-            return ""
-        terms = re.findall(r"[A-Za-z0-9]+", s)
-        return " ".join(f"{t}*" for t in terms if t)
-
     ors: list[str] = []
-    params: tuple = (clinician_user_id,)
+    params: list = [clinician_user_id]
+
+    # Precompute FULLTEXT queries
+    q_name = to_boolean_prefix_query(name) if name else ""
+    q_first_name = to_boolean_prefix_query(first_name) if first_name else ""
+    q_last_name = to_boolean_prefix_query(last_name) if last_name else ""
 
     operation = """
         SELECT
             p.id,
             p.name,
+            p.pending_email,
             CASE
                 WHEN p.user_id IS NULL THEN NULL
                 ELSE CAST(JSON_OBJECT(
@@ -175,53 +183,66 @@ def get_patients_for_attributes(
         WHERE p.clinician_user_id = %s
     """
 
-    # --- PATIENTS combined FULLTEXT index (name, pending_email) ---
-    if name:
-        ors.append("MATCH(p.name, p.pending_email) AGAINST (%s IN BOOLEAN MODE)")
-        q = to_boolean_prefix_query(name)
-        params += (q,)
-
+    # Email strict equality
     if email:
-        # Pending email via combined patient index
-        ors.append("MATCH(p.name, p.pending_email) AGAINST (%s IN BOOLEAN MODE)")
-        q = to_boolean_prefix_query(email)
-        params += (q,)
+        ors.append("(p.user_id IS NOT NULL AND u.email = %s)")
+        params.append(email)
+        ors.append("(p.pending_email IS NOT NULL AND p.pending_email = %s)")
+        params.append(email)
 
-    # --- USERS combined FULLTEXT index (first_name, last_name, email) ---
-    if first_name:
+    # FT on patients' name
+    if q_name:
+        ors.append("MATCH(p.name) AGAINST (%s IN BOOLEAN MODE)")
+        params.append(q_name)
+
+    # FULLTEXT on users' FIRST NAME only
+    if q_first_name:
         ors.append(
             "(p.user_id IS NOT NULL AND "
-            " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
+            " MATCH(u.first_name) AGAINST (%s IN BOOLEAN MODE))"
         )
-        q = q = to_boolean_prefix_query(first_name)
-        params += (q,)
+        params.append(q_first_name)
 
-    if last_name:
+    # FULLTEXT on users' LAST NAME only
+    if q_last_name:
         ors.append(
             "(p.user_id IS NOT NULL AND "
-            " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
+            " MATCH(u.last_name) AGAINST (%s IN BOOLEAN MODE))"
         )
-        q = to_boolean_prefix_query(last_name)
-        params += (q,)
-
-    if email:
-        ors.append(
-            "(p.user_id IS NOT NULL AND "
-            " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
-        )
-        q = to_boolean_prefix_query(email)
-        params += (q,)
+        params.append(q_last_name)
 
     if not ors:
         raise ValueError(
-            "At least one of name, first_name, last_name, or email is required (after sanitizing search terms)."
+            "At least one of name, first_name, last_name, or email is required."
         )
 
     operation += " AND (" + " OR ".join(ors) + ")"
-    operation += " ORDER BY p.id"
+
+    # Relevance ordering: sum scores from whichever FT parts are present; then stable by id
+    score_clauses: list[str] = []
+    score_params: list[str] = []
+    if q_name:
+        score_clauses.append("COALESCE(MATCH(p.name) AGAINST (%s IN BOOLEAN MODE), 0)")
+        score_params.append(q_name)
+    if q_first_name:
+        score_clauses.append(
+            "COALESCE(MATCH(u.first_name) AGAINST (%s IN BOOLEAN MODE), 0)"
+        )
+        score_params.append(q_first_name)
+    if q_last_name:
+        score_clauses.append(
+            "COALESCE(MATCH(u.last_name) AGAINST (%s IN BOOLEAN MODE), 0)"
+        )
+        score_params.append(q_last_name)
+
+    if score_clauses:
+        operation += " ORDER BY (" + " + ".join(score_clauses) + ") DESC, p.id"
+        params.extend(score_params)
+    else:
+        operation += " ORDER BY p.id"
 
     with get_db_cursor_cm() as cursor:
-        cursor.execute(operation, params)
+        cursor.execute(operation, tuple(params))
         rows = cursor.fetchall()
 
     return rows
