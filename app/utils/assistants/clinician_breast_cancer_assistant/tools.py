@@ -1,4 +1,5 @@
 import json
+import re
 
 from fastapi import HTTPException, status
 from langchain_core.runnables import RunnableConfig
@@ -145,10 +146,13 @@ def get_patients_for_attributes(
             parts.append(last_name)
         name = " ".join(parts) if parts else None
 
-    # BOOLEAN MODE query allowing prefix matches (no + => tokens are optional, improves recall)
+    # BOOLEAN MODE query allowing prefix matches (tokens optional).
+    # Sanitize by extracting alphanumeric terms only, to avoid '@', '.', '+', etc.
     def to_boolean_prefix_query(s: str) -> str:
-        tokens = [t for t in s.split() if t]
-        return " ".join(f"{t}*" for t in tokens)
+        if not s:
+            return ""
+        terms = re.findall(r"[A-Za-z0-9]+", s)
+        return " ".join(f"{t}*" for t in terms if t)
 
     ors: list[str] = []
     params: tuple = (clinician_user_id,)
@@ -174,40 +178,43 @@ def get_patients_for_attributes(
     # --- PATIENTS combined FULLTEXT index (name, pending_email) ---
     if name:
         ors.append("MATCH(p.name, p.pending_email) AGAINST (%s IN BOOLEAN MODE)")
-        params += (to_boolean_prefix_query(name),)
+        q = to_boolean_prefix_query(name)
+        params += (q,)
 
     if email:
-        # Use the same combined index to match pending_email by passing the email terms
+        # Pending email via combined patient index
         ors.append("MATCH(p.name, p.pending_email) AGAINST (%s IN BOOLEAN MODE)")
-        params += (to_boolean_prefix_query(email),)
+        q = to_boolean_prefix_query(email)
+        params += (q,)
 
     # --- USERS combined FULLTEXT index (first_name, last_name, email) ---
-    # Keep the same OR semantics you had before, but each term hits the combined index.
     if first_name:
         ors.append(
             "(p.user_id IS NOT NULL AND "
             " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
         )
-        params += (to_boolean_prefix_query(first_name),)
+        q = q = to_boolean_prefix_query(first_name)
+        params += (q,)
 
     if last_name:
         ors.append(
             "(p.user_id IS NOT NULL AND "
             " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
         )
-        params += (to_boolean_prefix_query(last_name),)
+        q = to_boolean_prefix_query(last_name)
+        params += (q,)
 
     if email:
         ors.append(
             "(p.user_id IS NOT NULL AND "
             " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
         )
-        params += (to_boolean_prefix_query(email),)
+        q = to_boolean_prefix_query(email)
+        params += (q,)
 
-    # Enforce that at least one search attribute is provided
     if not ors:
         raise ValueError(
-            "At least one of name, first_name, last_name, or email is required."
+            "At least one of name, first_name, last_name, or email is required (after sanitizing search terms)."
         )
 
     operation += " AND (" + " OR ".join(ors) + ")"
