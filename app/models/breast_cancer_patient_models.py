@@ -70,7 +70,7 @@ class Demographics(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def calculate_bmi(cls, data: Any) -> Any:
-        if data["Height"] and data["Weight"]:
+        if data.get("Height") and data.get("Weight"):
             data["BMI"] = calculate_bmi(data["Height"], data["Weight"])
         return data
 
