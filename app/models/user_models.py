@@ -44,8 +44,19 @@ class UserSummary(BaseModel):
     email: EmailConstrained = Field(..., example="user@example.com")
 
 
+ASCII_NO_SPACE = (
+    r"^[\x21-\x7E]+$"  # Password policy: Restrict to printable ASCII, no spaces
+)
+
+
 class RegisterRequest(UserSummary, RoleAndCondition):
-    password: str = Field(..., example="password123")
+    password: str = Field(
+        ...,
+        example="password123",
+        min_length=3,
+        max_length=128,
+        pattern=ASCII_NO_SPACE,
+    )
 
 
 class User(UserSummary, RoleAndCondition):
