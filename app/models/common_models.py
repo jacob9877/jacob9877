@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
+from typing_extensions import Annotated
 
 T = TypeVar("T")  # Generic type for data models
 
@@ -19,6 +20,12 @@ class PaginatedResults(BaseModel):
 ApprovalStatus = Literal["approved", "rejected"]
 
 
+EmailConstrained = Annotated[
+    EmailStr, StringConstraints(strip_whitespace=True, to_lower=True)
+]
+StrStripWhitespace = Annotated[str, StringConstraints(strip_whitespace=True)]
+
+
 class Timestamps(BaseModel):
     created_at: datetime
     updated_at: datetime
@@ -30,9 +37,11 @@ class PatientBase(Timestamps):
     id: int
     clinician_user_id: int
     user_id: int | None = None
-    pending_email: EmailStr | None = Field(default=None, example="user@example.com")
-    name: str | None = Field(default=None, example="John Doe")
+    pending_email: EmailConstrained | None = Field(
+        default=None, example="user@example.com"
+    )
+    name: StrStripWhitespace | None = Field(default=None, example="John Doe")
 
 
 class SetPatientEmailRequest(BaseModel):
-    email: EmailStr = Field(..., example="user@example.com")
+    email: EmailConstrained = Field(..., example="user@example.com")

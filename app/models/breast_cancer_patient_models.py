@@ -1,9 +1,15 @@
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-from app.models.common_models import ApprovalStatus, PaginatedResults, PatientBase
+from app.models.common_models import (
+    ApprovalStatus,
+    EmailConstrained,
+    PaginatedResults,
+    PatientBase,
+    StrStripWhitespace,
+)
 from app.models.user_models import UserSummary
 
 
@@ -69,12 +75,12 @@ class FeaturesAndDemographics(Features, Demographics):
 
 
 class UpsertPatientRequest(FeaturesAndDemographics):
-    name: str | None = Field(
+    name: StrStripWhitespace | None = Field(
         default=None,
         example="John Doe",
         description="Optionally set a name/nickname for the patient, this will be overriden if the patient has an account",
     )
-    email: EmailStr | None = Field(default=None, example="user@example.com")
+    email: EmailConstrained | None = Field(default=None, example="user@example.com")
 
 
 class AddPatientsRequest(BaseModel):

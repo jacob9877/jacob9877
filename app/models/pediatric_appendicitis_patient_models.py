@@ -2,9 +2,15 @@ import json
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.models.common_models import ApprovalStatus, PaginatedResults, PatientBase
+from app.models.common_models import (
+    ApprovalStatus,
+    EmailConstrained,
+    PaginatedResults,
+    PatientBase,
+    StrStripWhitespace,
+)
 from app.models.user_models import UserSummary
 from app.utils.medical import (
     calculate_alvarado_score,
@@ -297,13 +303,16 @@ class Patient(PatientBase, Features, Predictions, Approvals):
 
 
 class ImageBase(BaseModel):
-    upload_id: str = Field(..., example="f47ac10b-58cc-4372-a567-0e02b2c3d479")
-    name: str | None = Field(default=None, example="Front view")
+    upload_id: StrStripWhitespace = Field(
+        ..., example="f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    )
+    name: StrStripWhitespace | None = Field(default=None, example="Front view")
 
 
 class ImageResponse(ImageBase):
-    url: str = Field(
-        example="https://pediatric-appendicitis-images.s3.us-east-1.amazonaws.com/key?..."
+    url: StrStripWhitespace = Field(
+        ...,
+        example="https://pediatric-appendicitis-images.s3.us-east-1.amazonaws.com/key?...",
     )
     created_at: datetime
 
@@ -330,12 +339,12 @@ class UpsertPatientRequest(BaseModel):
         default=[],
         description="List of upload ids & names associated with pre-signed uploads already completed",
     )
-    name: str | None = Field(
+    name: StrStripWhitespace | None = Field(
         default=None,
         example="John Doe",
         description="Optionally set a name/nickname for the patient, this will be overriden if the patient has an account",
     )
-    email: EmailStr | None = Field(default=None, example="user@example.com")
+    email: EmailConstrained | None = Field(default=None, example="user@example.com")
 
 
 class S3Uri(BaseModel):
