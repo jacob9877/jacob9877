@@ -62,7 +62,9 @@ async def send_registration_email(
     registration_link = f"{os.environ['FRONTEND_URL']}/register?role={registration_role_and_condition.role.value}"
 
     if registration_role_and_condition.condition:
-        registration_link += f"?condition={registration_role_and_condition.condition}"
+        registration_link += (
+            f"?condition={registration_role_and_condition.condition.value}"
+        )
 
     message = MessageSchema(
         subject="Registration Invite",
