@@ -514,13 +514,13 @@ def _update_patient(
             "description": "Email is invalid due to data circumstances",
         },
     },
-    dependencies=[Depends(validate_pediatric_appendicitis_patient_id)],
 )
 async def update_patient(
     patient_id: int,
     update_patient_request: UpsertPatientRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
 ):
     # Deal with the email first in case there is a conflict we can return quickly
     if update_patient_request.email:
@@ -532,6 +532,21 @@ async def update_patient(
             clinician_first_name=current_user.first_name,
             clinician_last_name=current_user.last_name,
         )
+
+    patient_with_images = package_patient_with_images(cursor, patient)
+    repredict: bool = False
+    # If any feature value has changed, re-predict
+    if any(
+        getattr(patient_with_images, feature)
+        != getattr(update_patient_request.features, feature)
+        for feature in FEATURE_NAMES
+    ):
+        repredict = True
+    # If the new upload ids are not the same as the existing ones, re-predict.
+    if set(image.upload_id for image in patient_with_images.images) != set(
+        image.upload_id for image in update_patient_request.image_uploads
+    ):
+        repredict = True
 
     # If the user provided images
     if update_patient_request.image_uploads:
@@ -557,17 +572,22 @@ async def update_patient(
         params = (patient_id, current_user.id)
         cursor.execute(operation, params)
 
-    image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
-        for image_upload in update_patient_request.image_uploads
-    ]
+    if repredict:
+        image_s3_uris = [
+            _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
+            for image_upload in update_patient_request.image_uploads
+        ]
 
-    body = {
-        "features": update_patient_request.features.model_dump(),
-        "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
-    }
-    result = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
-    predictions = Predictions(**result)
+        body = {
+            "features": update_patient_request.features.model_dump(),
+            "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
+        }
+        result = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
+        predictions = Predictions(**result)
+    else:
+        predictions = Predictions.model_validate(
+            patient_with_images, from_attributes=True
+        )
 
     updated_patient = _update_patient(
         cursor=cursor,

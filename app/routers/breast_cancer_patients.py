@@ -458,17 +458,23 @@ def _update_and_repredict(
     cursor: MySQLCursorDict,
     patient_id: int,
     upsert_patient_request: UpsertPatientRequest,
+    repredict: bool,
 ) -> GetPatientResponse:
-    # Re-predict
-    instance = [
-        getattr(upsert_patient_request, feature_name) for feature_name in FEATURE_NAMES
-    ]
-    result = get_predictions({"instances": [instance]}, SAGEMAKER_ENDPOINT_NAME)
+    if repredict:
+        instance = [
+            getattr(upsert_patient_request, feature_name)
+            for feature_name in FEATURE_NAMES
+        ]
+        result = get_predictions({"instances": [instance]}, SAGEMAKER_ENDPOINT_NAME)
 
-    new_diagnosis = result["predictions"][0][0]
+        new_diagnosis = result["predictions"][0][0]
+    else:
+        new_diagnosis = None
 
     upsert_patient_request_json = upsert_patient_request.model_dump(exclude={"email"})
-    columns = ["diagnosis"] + list(upsert_patient_request_json.keys())
+    columns = list(upsert_patient_request_json.keys()) + (
+        ["diagnosis"] if new_diagnosis is not None else []
+    )
     set_clause = ", ".join(f"{column}=%s" for column in columns)
     operation = f"""
         UPDATE breast_cancer_patients
@@ -476,7 +482,9 @@ def _update_and_repredict(
         WHERE id=%s
     """
     params = tuple(
-        [new_diagnosis] + list(upsert_patient_request_json.values()) + [patient_id]
+        list(upsert_patient_request_json.values())
+        + ([new_diagnosis] if new_diagnosis is not None else [])
+        + [patient_id]
     )
     cursor.execute(operation, params)
 
@@ -484,48 +492,6 @@ def _update_and_repredict(
         cursor=cursor, patient_id=patient_id
     )
     return updated_patient
-
-
-# @router.post(
-#     "/{patient_id}/repredict",
-#     summary="Re-predict a patient's diagnosis",
-#     description="Re-predicts and saves the patient's diagnosis using the latest model. **No request body.**",
-#     response_model=ResponseModel[GetPatientResponse],
-#     response_description="Returns the updated patient with the new diagnosis",
-#     status_code=status.HTTP_200_OK,
-#     responses={
-#         status.HTTP_403_FORBIDDEN: {
-#             "model": ResponseModel[None],
-#             "description": "Not authorized to perform the requested action",
-#         },
-#         status.HTTP_404_NOT_FOUND: {
-#             "model": ResponseModel[None],
-#             "description": "Patient not found",
-#         },
-#     },
-#     dependencies=[
-#         Depends(validate_breast_cancer_patient_id),
-#     ],
-# )
-# def repredict_patient(
-#     patient_id: int = Path(..., description="ID of the patient to re-predict"),
-#     cursor: MySQLCursorDict = Depends(get_db_cursor),
-# ):
-#     updated_patient = _update_and_repredict(
-#         cursor=cursor,
-#         patient_id=patient_id,
-#     )
-
-#     # Send the new patient info to SQS for explanation processing
-#     messages = [
-#         updated_patient.model_dump(include=set(FEATURE_NAMES))
-#         | {"patient_id": updated_patient.id}
-#     ]
-#     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
-
-#     return ResponseModel[GetBreastCancerPatientResponse](
-#         data=updated_patient, detail="Re-predicted successfully"
-#     )
 
 
 @router.put(
@@ -553,15 +519,13 @@ def _update_and_repredict(
             "description": "Email is invalid due to data circumstances",
         },
     },
-    dependencies=[
-        Depends(validate_breast_cancer_patient_id),
-    ],
 )
 async def update_patient(
     patient_id: int,
     update_patient_request: UpsertPatientRequest,
     cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
 ):
     # Deal with the email first in case there is a conflict we can return quickly
     if update_patient_request.email:
@@ -574,10 +538,17 @@ async def update_patient(
             clinician_last_name=current_user.last_name,
         )
 
+    # If any feature value has changed, re-predict. Otherwise if everything is unchanged, don't.
+    repredict = any(
+        getattr(patient, feature) != getattr(update_patient_request, feature)
+        for feature in FEATURE_NAMES
+    )
+
     updated_patient = _update_and_repredict(
         cursor=cursor,
         patient_id=patient_id,
         upsert_patient_request=update_patient_request,
+        repredict=repredict,
     )
 
     # Send the new patient info to SQS for explanation processing
