@@ -14,6 +14,7 @@ from app.models.common_models import (
 from app.models.user_models import UserSummary
 from app.utils.medical import (
     calculate_alvarado_score,
+    calculate_bmi,
     calculate_neutrophilia,
     calculate_pediatric_appendicits_score,
 )
@@ -272,7 +273,7 @@ class Features(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def calculate_scores(cls, data: Any) -> Any:
-        data["BMI"] = data["Weight"] / (data["Height"] / 100)
+        data["BMI"] = calculate_bmi(data["Height"], data["Weight"])
         data["Neutrophilia"] = calculate_neutrophilia(data["Neutrophil_Percentage"])
         data["Alvarado_Score"] = calculate_alvarado_score(data)
         data["Paedriatic_Appendicitis_Score"] = calculate_pediatric_appendicits_score(

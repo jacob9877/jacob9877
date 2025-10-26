@@ -1,7 +1,25 @@
 from typing import Any, Literal
 
 
+def calculate_bmi(height: float, weight: float) -> float:
+    """
+    Calculate BMI
+
+    Args:
+        height (float): height in centimeters (cm)
+        weight (float): weight in kilgrams (kg)
+    """
+    if height and weight:
+        height_in_meters = height / 100
+        return weight / height_in_meters
+    raise ValueError("Height or weight is invalid")
+
+
 def calculate_neutrophilia(neutrophils_percentage: float) -> Literal["yes", "no"]:
+    """
+    Args:
+        neutrophils_percentage (float): example: 80.91
+    """
     if neutrophils_percentage > 75:
         return "yes"
     return "no"

@@ -1,7 +1,7 @@
 import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.common_models import (
     ApprovalStatus,
@@ -11,6 +11,7 @@ from app.models.common_models import (
     StrStripWhitespace,
 )
 from app.models.user_models import UserSummary
+from app.utils.medical import calculate_bmi
 
 
 class Features(BaseModel):
@@ -65,6 +66,13 @@ class Demographics(BaseModel):
         example=36.391,
         description="Weight in kilograms (kg) / Height in meters (m)",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def calculate_bmi(cls, data: Any) -> Any:
+        if data["Height"] and data["Weight"]:
+            data["BMI"] = calculate_bmi(data["Height"], data["Weight"])
+        return data
 
 
 DEMOGRAPHICS_NAMES = list(Demographics.model_fields.keys())
