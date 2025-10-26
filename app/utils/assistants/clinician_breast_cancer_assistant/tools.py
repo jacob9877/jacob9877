@@ -134,14 +134,24 @@ def get_patients_for_attributes(
     *,
     config: RunnableConfig,
 ) -> list[dict]:
-    clinician_user_id = config["configurable"].get("user_id")
+    clinician_user_id = config["configurable"]["user_id"]
 
-    if name is None:
-        name = ""
+    # If name isn't provided, fall back to concatenation of first/last (searches p.name)
+    if not name:
+        parts: list[str] = []
         if first_name:
-            name += first_name
+            parts.append(first_name)
         if last_name:
-            name += last_name
+            parts.append(last_name)
+        name = " ".join(parts) if parts else None
+
+    # BOOLEAN MODE query allowing prefix matches (no + => tokens are optional, improves recall)
+    def to_boolean_prefix_query(s: str) -> str:
+        tokens = [t for t in s.split() if t]
+        return " ".join(f"{t}*" for t in tokens)
+
+    ors: list[str] = []
+    params: tuple = (clinician_user_id,)
 
     operation = """
         SELECT
@@ -160,31 +170,47 @@ def get_patients_for_attributes(
             ON u.id = p.user_id
         WHERE p.clinician_user_id = %s
     """
-    params: tuple = (clinician_user_id,)
 
-    ors = []
+    # --- PATIENTS combined FULLTEXT index (name, pending_email) ---
     if name:
-        ors.append("LOWER(p.name) LIKE CONCAT(LOWER(%s), '%%')")
-        params += (name,)
+        ors.append("MATCH(p.name, p.pending_email) AGAINST (%s IN BOOLEAN MODE)")
+        params += (to_boolean_prefix_query(name),)
+
+    if email:
+        # Use the same combined index to match pending_email by passing the email terms
+        ors.append("MATCH(p.name, p.pending_email) AGAINST (%s IN BOOLEAN MODE)")
+        params += (to_boolean_prefix_query(email),)
+
+    # --- USERS combined FULLTEXT index (first_name, last_name, email) ---
+    # Keep the same OR semantics you had before, but each term hits the combined index.
     if first_name:
         ors.append(
-            "(p.user_id IS NOT NULL AND LOWER(u.first_name) LIKE CONCAT(LOWER(%s), '%%'))"
+            "(p.user_id IS NOT NULL AND "
+            " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
         )
-        params += (first_name,)
+        params += (to_boolean_prefix_query(first_name),)
+
     if last_name:
         ors.append(
-            "(p.user_id IS NOT NULL AND LOWER(u.last_name) LIKE CONCAT('%%', LOWER(%s)))"
+            "(p.user_id IS NOT NULL AND "
+            " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
         )
-        params += (last_name,)
+        params += (to_boolean_prefix_query(last_name),)
+
     if email:
         ors.append(
-            "(p.user_id IS NOT NULL AND LOWER(u.email) LIKE CONCAT(LOWER(%s), '%%'))"
+            "(p.user_id IS NOT NULL AND "
+            " MATCH(u.first_name, u.last_name, u.email) AGAINST (%s IN BOOLEAN MODE))"
         )
-        params += (email,)
+        params += (to_boolean_prefix_query(email),)
 
-    if ors:
-        operation += " AND (" + " OR ".join(ors) + ")"
+    # Enforce that at least one search attribute is provided
+    if not ors:
+        raise ValueError(
+            "At least one of name, first_name, last_name, or email is required."
+        )
 
+    operation += " AND (" + " OR ".join(ors) + ")"
     operation += " ORDER BY p.id"
 
     with get_db_cursor_cm() as cursor:
