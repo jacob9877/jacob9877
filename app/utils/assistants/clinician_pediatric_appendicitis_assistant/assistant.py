@@ -12,6 +12,7 @@ from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools impor
     EXPLAIN_MANAGEMENT_PROMPT,
     explain_diagnosis,
     get_patient_info,
+    get_pediatric_appendicitis_patients_for_attributes,
 )
 from app.utils.assistants.common_tools import (
     get_clinical_trial_by_id,
@@ -145,6 +146,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
                     explain_diagnosis,
                     get_clinical_trial_by_id,
                     get_clinical_trials,
+                    get_pediatric_appendicitis_patients_for_attributes,
                 ],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,

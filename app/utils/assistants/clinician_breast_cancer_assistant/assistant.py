@@ -6,8 +6,8 @@ from app.models.conversation_models import AssistantSlug, Conversation
 from app.utils.assistants.base_assistant import Assistant
 from app.utils.assistants.clinician_breast_cancer_assistant.tools import (
     explain_diagnosis,
+    get_breast_cancer_patients_for_attributes,
     get_patient_info,
-    get_patients_for_attributes,
 )
 from app.utils.assistants.common_tools import (
     get_clinical_trial_by_id,
@@ -128,7 +128,7 @@ class ClinicianBreastCancerAssistant(Assistant):
                     get_patient_info,
                     get_clinical_trials,
                     get_clinical_trial_by_id,
-                    get_patients_for_attributes,
+                    get_breast_cancer_patients_for_attributes,
                 ],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,

@@ -175,7 +175,7 @@ def explain_diagnosis(
     description=get_patients_for_attributes_description,
     args_schema=GetPatientsForAttributesInput,
 )
-def get_breast_cancer_patients_for_attributes(
+def get_pediatric_appendicitis_patients_for_attributes(
     name: str | None = None,
     first_name: str | None = None,
     last_name: str | None = None,
