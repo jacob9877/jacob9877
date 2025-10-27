@@ -6,6 +6,11 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from app.utils.assistants.common_tools import (
+    GetPatientsForAttributesInput,
+    get_patients_for_attributes,
+    get_patients_for_attributes_description,
+)
 from app.utils.db import get_db_cursor_cm, get_pediatric_appendicitis_patient_by_id
 
 EXPLAIN_DIAGNOSIS_PROMPT = """
@@ -164,3 +169,27 @@ def explain_diagnosis(
     row.pop("clinician_user_id")
     row[explanation_column] = json.loads(row[explanation_column])
     return row
+
+
+@tool(
+    description=get_patients_for_attributes_description,
+    args_schema=GetPatientsForAttributesInput,
+)
+def get_breast_cancer_patients_for_attributes(
+    name: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    email: str | None = None,
+    *,
+    config: RunnableConfig,
+) -> list[dict]:
+    clinician_user_id = config["configurable"]["user_id"]
+
+    return get_patients_for_attributes(
+        clinician_user_id,
+        "pediatric_appendicitis_patients",
+        name,
+        first_name,
+        last_name,
+        email,
+    )
