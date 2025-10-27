@@ -162,6 +162,18 @@ def get_patients_for_attributes(
             parts.append(last_name)
         name = " ".join(parts) if parts else None
 
+    if not first_name:
+        if name:
+            first_name = name
+        elif last_name:
+            first_name = last_name
+
+    if not last_name:
+        if name:
+            last_name = name
+        elif first_name:
+            last_name = first_name
+
     ors: list[str] = []
     params: list = [clinician_user_id]
 
