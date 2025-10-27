@@ -143,15 +143,21 @@ def get_patients_for_attributes(
     last_name: str | None = None,
     email: str | None = None,
 ) -> list[dict]:
-    # BOOLEAN MODE: require tokens, allow prefix (+token*)
     def to_boolean_prefix_query(s: str) -> str:
+        """
+        Build a BOOLEAN MODE query that matches if *any* token is present (OR semantics),
+        with prefix matching on each token (token*).
+        """
         if not s:
             return ""
         terms = re.findall(r"[0-9A-Za-z\u00C0-\u017F'-]+", s)
         terms = [t for t in terms if t]
         if not terms:
             return ""
-        return " ".join(f"+{t}*" for t in terms)
+
+        tokens = [f"{t}*" for t in terms]
+        # Space-separated => OR semantics in BOOLEAN MODE
+        return " ".join(tokens)
 
     # Fall back: combine first/last if name not provided (still useful for p.name)
     if not name:
