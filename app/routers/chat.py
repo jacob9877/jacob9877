@@ -5,6 +5,10 @@ from app.models.chat_models import ChatRequest, ChatResponse
 from app.models.common_models import ResponseModel
 from app.models.conversation_models import AssistantSlug
 from app.models.user_models import User
+from app.routers.breast_cancer_patients import get_breast_cancer_patients_paginated
+from app.routers.pediatric_appendicitis_patients import (
+    get_pediatric_appendicitis_patients_paginated,
+)
 from app.utils.assistants.access import has_access_to_assistant
 from app.utils.assistants.mapping import assistant_mapping
 from app.utils.db import get_db_cursor
@@ -125,6 +129,36 @@ def get_chat_suggestions(
 
         suggestions.append("What are some recruiting breast cancer clinical trials?")
 
+        first_name: str | None = None
+        last_name: str | None = None
+        cursor_token: str | None = None
+        limit = 15
+
+        while True:
+            patients_response = get_breast_cancer_patients_paginated(
+                cursor_token=cursor_token,
+                limit=limit,
+                cursor=cursor,
+                current_user=current_user,
+            )
+            found = False
+            for patient in patients_response.data.patients:
+                if patient.patient_user_info:
+                    first_name = patient.patient_user_info.first_name
+                    last_name = patient.patient_user_info.last_name
+                    found = True
+                    break
+            if found:
+                break
+
+            if patients_response.data.next_cursor:
+                cursor_token = patients_response.data.next_cursor
+            else:
+                break
+
+        if first_name and last_name:
+            suggestions.append(f"Tell me about my patient {first_name} {last_name}")
+
     elif assistant == "clinician-pediatric-appendicitis":
         operation = """
             SELECT p.id, p.diagnosis, p.management
@@ -153,6 +187,36 @@ def get_chat_suggestions(
         suggestions.append(
             "Are there any recruiting clinical trials for pediatric appendicitis?"
         )
+
+        first_name: str | None = None
+        last_name: str | None = None
+        cursor_token: str | None = None
+        limit = 15
+
+        while True:
+            patients_response = get_pediatric_appendicitis_patients_paginated(
+                cursor_token=cursor_token,
+                limit=limit,
+                cursor=cursor,
+                current_user=current_user,
+            )
+            found = False
+            for patient in patients_response.data.patients:
+                if patient.patient_user_info:
+                    first_name = patient.patient_user_info.first_name
+                    last_name = patient.patient_user_info.last_name
+                    found = True
+                    break
+            if found:
+                break
+
+            if patients_response.data.next_cursor:
+                cursor_token = patients_response.data.next_cursor
+            else:
+                break
+
+        if first_name and last_name:
+            suggestions.append(f"Tell me about my patient {first_name} {last_name}")
 
     elif assistant == "patient-breast-cancer":
         suggestions.append("What are some common breast cancer recovery struggles?")
