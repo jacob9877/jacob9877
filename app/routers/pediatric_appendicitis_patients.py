@@ -2,7 +2,16 @@ import os
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Security,
+    status,
+)
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.common_models import ResponseModel
@@ -73,9 +82,9 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
     response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request to S3)",
 )
 def create_presigned_uploads(
-    request: PostImagesRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    request: PostImagesRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     presigned_uploads: list[PresignedUpload] = []
     for file_type in request.file_types:
@@ -213,9 +222,9 @@ def package_patient_with_images(
     },
 )
 async def add_patient(
-    add_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    add_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     image_s3_uris = [
         _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
@@ -302,8 +311,8 @@ async def add_patient(
     },
 )
 def get_patient(
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     patient_with_images = package_patient_with_images(cursor, patient)
 
@@ -343,8 +352,8 @@ def get_pediatric_appendicitis_patients_paginated(
         le=100,
         description="Max number of patients to return (1–100)",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Order is (updated_at DESC, id DESC).
     # For "next page", fetch rows strictly "after" the cursor in that order:
@@ -448,7 +457,7 @@ def get_pediatric_appendicitis_patients_paginated(
     ],
 )
 def delete_patient(
-    patient_id: int,
+    patient_id: int = Path(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Delete the patient record
@@ -517,11 +526,11 @@ def _update_patient(
     },
 )
 async def update_patient(
-    patient_id: int,
-    update_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    patient_id: int = Path(...),
+    update_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
     patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Deal with the email first in case there is a conflict we can return quickly
     if update_patient_request.email:
@@ -645,8 +654,8 @@ def delete_patients(
         description="List of patient IDs to delete",
         example="ids=1&ids=2&ids=3",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Verify all IDs exist
     placeholders = ",".join(["%s"] * len(patient_ids))
@@ -712,12 +721,13 @@ def delete_patients(
     dependencies=[
         Depends(validate_pediatric_appendicitis_patient_id),
     ],
+    deprecated=True,
 )
 async def set_patient_email(
-    patient_id: int,
-    set_patient_email_request: SetPatientEmailRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    patient_id: int = Path(...),
+    set_patient_email_request: SetPatientEmailRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     await insert_pending_email(
         cursor=cursor,

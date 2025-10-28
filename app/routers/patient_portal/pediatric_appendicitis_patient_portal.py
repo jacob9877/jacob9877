@@ -38,8 +38,8 @@ router = APIRouter(
 
 
 def get_patient_info_for_user(
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ) -> Patient:
     operation = """
         SELECT *
@@ -67,8 +67,8 @@ def get_patient_info_for_user(
     status_code=status.HTTP_200_OK,
 )
 def get_current_patient_info(
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     patient: Patient = Depends(get_patient_info_for_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     columns = list(UserSummary.model_fields.keys())
     operation = f"""
@@ -112,8 +112,8 @@ def get_current_patient_info(
     status_code=status.HTTP_200_OK,
 )
 def get_current_patient_clinical_notes(
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     patient: Patient = Depends(get_patient_info_for_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     columns = list(GetClinicalNoteResponse.model_fields.keys())
     operation = f"""

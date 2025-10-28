@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import Message
@@ -39,26 +39,26 @@ router = APIRouter(
 
 @router.post(
     "",
-    summary="Create a conversation",
-    description="TODO",
+    summary="Start a conversation",
+    description="Given some parameters for the conversation, initializes a conversation that messages can be sent on",
     response_model=ResponseModel[StartConversationResponse],
-    response_description="New conversation info",
+    response_description="The new conversation info",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to chat about the requested patient",
+            "description": "Not authorized to chat about the requested patient or with the requested assistant",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
-            "description": "Patient not found",
+            "description": "Patient with requested ID not found",
         },
     },
 )
 def start_conversation(
-    request: StartConversationRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    request: StartConversationRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Verify access to the requested assistant
     if not has_access_to_assistant(
@@ -120,10 +120,10 @@ def _get_conversation_history(
 
 @router.get(
     "/{conversation_id}",
-    summary="Get all messages in a conversation",
-    description="Get all messages for the conversation with the provided ID",
+    summary="Get conversation history",
+    description="Get all messages for a conversation",
     response_model=ResponseModel[GetConversationResponse],
-    response_description="Messages in the conversation sorted by timestamp",
+    response_description="Messages sorted by updated_at desc",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
@@ -137,8 +137,8 @@ def _get_conversation_history(
     },
 )
 def get_conversation(
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     conversation: Conversation = Depends(validate_conversation_id),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     messages = _get_conversation_history(cursor, conversation.id)
 
@@ -159,11 +159,9 @@ def get_conversation(
     status_code=status.HTTP_200_OK,
 )
 def get_user_conversations(
-    assistant: AssistantSlug | None = Query(
-        default=None, description="Type of assistant to filter conversations by"
-    ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    assistant: AssistantSlug | None = Query(default=None),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     where_clause = "user_id=%s"
     params = (current_user.id,)
@@ -183,5 +181,5 @@ def get_user_conversations(
 
     conversations = [ConversationSummary(**row) for row in rows]
     return ResponseModel[list[ConversationSummary]](
-        data=conversations, detail="Fetched conversations successfully"
+        data=conversations, detail="Conversations fetched successfully"
     )

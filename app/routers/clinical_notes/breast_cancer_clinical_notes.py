@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.clinical_notes_models import ClinicalNote, UpsertClinicalNoteRequest
@@ -35,7 +35,9 @@ router = APIRouter(
 
 
 def validate_note_id(
-    patient_id: int, note_id: int, cursor: MySQLCursorDict = Depends(get_db_cursor)
+    patient_id: int = Path(...),
+    note_id: int = Path(...),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ) -> ClinicalNote:
     clinical_note = get_breast_cancer_clinical_note_by_id(cursor, note_id)
     if clinical_note is None:
@@ -61,7 +63,7 @@ def validate_note_id(
     status_code=status.HTTP_200_OK,
 )
 def get_clinical_notes(
-    patient_id: int,
+    patient_id: int = Path(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     operation = """
@@ -112,8 +114,8 @@ def get_clinical_note(
     status_code=status.HTTP_201_CREATED,
 )
 def add_clinical_note(
-    patient_id: int,
-    add_clinical_note_request: UpsertClinicalNoteRequest,
+    patient_id: int = Path(...),
+    add_clinical_note_request: UpsertClinicalNoteRequest = Body(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Insert the new note
@@ -148,8 +150,8 @@ def add_clinical_note(
     },
 )
 def update_clinical_note(
-    note_id: int,
-    edit_clinical_note_request: UpsertClinicalNoteRequest,
+    note_id: int = Path(...),
+    edit_clinical_note_request: UpsertClinicalNoteRequest = Body(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Insert the new note
@@ -183,7 +185,7 @@ def update_clinical_note(
     },
 )
 def delete_clinical_note(
-    note_id: int,
+    note_id: int = Path(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Insert the new note

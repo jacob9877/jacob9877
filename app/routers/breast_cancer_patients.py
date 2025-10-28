@@ -4,9 +4,11 @@ from typing import Literal
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     HTTPException,
+    Path,
     Query,
     Response,
     Security,
@@ -159,9 +161,9 @@ def _add_patients(
     },
 )
 async def add_patient(
-    add_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    add_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     new_patient = _add_patients(
         cursor=cursor,
@@ -215,9 +217,9 @@ async def add_patient(
     },
 )
 async def add_patients_json(
-    add_patients_request: AddPatientsRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    add_patients_request: AddPatientsRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     upsert_patient_requests = [
         UpsertPatientRequest.model_validate(patient_features)
@@ -279,8 +281,8 @@ async def add_patients_json(
 )
 async def add_patients_csv(
     file: UploadFile | None = File(None),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     file.file.seek(0)
     content = file.file.read().decode("utf-8")
@@ -374,8 +376,8 @@ def get_breast_cancer_patients_paginated(
         le=100,
         description="Max number of patients to return (1–100)",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Order is (updated_at DESC, id DESC).
     # For "next page", fetch rows strictly "after" the cursor in that order:
@@ -525,11 +527,11 @@ def _update_and_repredict(
     },
 )
 async def update_patient(
-    patient_id: int,
-    update_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    patient_id: int = Path(...),
+    update_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
     patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Deal with the email first in case there is a conflict we can return quickly
     if update_patient_request.email:
@@ -591,8 +593,8 @@ def delete_patients(
         description="List of patient IDs to delete",
         example="ids=1&ids=2&ids=3",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Verify all IDs exist
     placeholders = ",".join(["%s"] * len(patient_ids))
@@ -661,10 +663,10 @@ def delete_patients(
     deprecated=True,
 )
 async def set_patient_email(
-    patient_id: int,
-    set_patient_email_request: SetPatientEmailRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    patient_id: int = Path(...),
+    set_patient_email_request: SetPatientEmailRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     await insert_pending_email(
         cursor=cursor,

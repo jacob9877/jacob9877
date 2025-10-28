@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from mysql.connector.cursor import MySQLCursorDict
 
@@ -144,7 +144,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
     },
 )
 def register(
-    register_request: RegisterRequest,
+    register_request: RegisterRequest = Body(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Check if user exists with provided email
@@ -198,7 +198,8 @@ def register(
     },
 )
 async def request_password_reset(
-    data: PasswordResetRequest, cursor: MySQLCursorDict = Depends(get_db_cursor)
+    data: PasswordResetRequest = Body(...),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
     user = cursor.fetchone()
@@ -254,7 +255,8 @@ async def request_password_reset(
     },
 )
 def reset_password(
-    data: PasswordResetConfirm, cursor: MySQLCursorDict = Depends(get_db_cursor)
+    data: PasswordResetConfirm = Body(...),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     try:
         payload = jwt.decode(data.token, SECRET_KEY, algorithms=[JWT_ALGORITHM])

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.chat_models import ChatRequest, ChatResponse
@@ -64,23 +64,26 @@ def _insert_message(
     },
 )
 def chat(
-    request: ChatRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    chat_request: ChatRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     conversation = validate_conversation_id(
-        request.conversation_id, cursor, current_user
+        chat_request.conversation_id, cursor, current_user
     )
 
     assistant = assistant_mapping[conversation.assistant](conversation)
-    assistant_reply = assistant.invoke(request.user_message)
+    assistant_reply = assistant.invoke(chat_request.user_message)
 
-    _insert_message(cursor, request.conversation_id, "user", request.user_message)
-    _insert_message(cursor, request.conversation_id, "assistant", assistant_reply)
+    _insert_message(
+        cursor, chat_request.conversation_id, "user", chat_request.user_message
+    )
+    _insert_message(cursor, chat_request.conversation_id, "assistant", assistant_reply)
 
     return ResponseModel[ChatResponse](
         data=ChatResponse(
-            assistant_reply=assistant_reply, conversation_id=request.conversation_id
+            assistant_reply=assistant_reply,
+            conversation_id=chat_request.conversation_id,
         ),
         detail="Reply and title generated successfully",
     )
@@ -96,8 +99,8 @@ def chat(
 )
 def get_chat_suggestions(
     assistant: AssistantSlug = Query(...),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Verify access to the requested assistant
     if not has_access_to_assistant(

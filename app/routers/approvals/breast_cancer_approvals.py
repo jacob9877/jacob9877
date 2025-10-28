@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Security, status
+from fastapi import APIRouter, Body, Depends, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.approvals_models import PostBreastCancerApproval
@@ -40,7 +40,7 @@ router = APIRouter(
     response_description="Nothing",
 )
 def post_approval(
-    approval_request: PostBreastCancerApproval,
+    approval_request: PostBreastCancerApproval = Body(...),
     patient: Patient = Depends(validate_breast_cancer_patient_id),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):

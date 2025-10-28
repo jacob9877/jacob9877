@@ -1,6 +1,7 @@
 import bcrypt
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
     Request,
@@ -55,8 +56,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     },
 )
 def login(
-    login_request: LoginRequest,
     response: Response,
+    login_request: LoginRequest = Body(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     user = get_user_by_email(cursor, login_request.email)
