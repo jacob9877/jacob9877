@@ -689,8 +689,6 @@ def get_patient_report(
     patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
 ):
     report_bytes = build_patient_report_pdf(patient)
-    with open("sample.pdf", "wb") as file:
-        file.write(report_bytes)
     filename = "Patient_Report"
     return Response(
         content=report_bytes,
