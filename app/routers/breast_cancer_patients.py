@@ -14,6 +14,7 @@ from fastapi import (
     status,
 )
 from mysql.connector.cursor import MySQLCursorDict
+from slugify import slugify
 
 from app.models.breast_cancer_patient_models import (
     FEATURE_NAMES,
@@ -688,8 +689,10 @@ async def set_patient_email(
 def get_patient_report(
     patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
 ):
-    report_bytes = build_patient_report_pdf(patient)
-    filename = "Patient_Report"
+    patient_title = patient.get_patient_title()
+    report_bytes = build_patient_report_pdf(patient, patient_title)
+    file_stem = slugify(f"Breast Cancer Report: {patient_title}", separator="_")
+    filename = f"{file_stem}.pdf"
     return Response(
         content=report_bytes,
         media_type="application/pdf",

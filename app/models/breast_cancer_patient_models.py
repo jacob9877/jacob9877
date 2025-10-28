@@ -115,7 +115,18 @@ class Patient(PatientBase, FeaturesAndDemographics, Predictions, Approvals):
     """Database model for breast_cancer_patients table"""
 
 
-class GetPatientResponse(Patient, PatientUserInfo): ...
+class GetPatientResponse(Patient, PatientUserInfo):
+    def get_patient_title(self) -> str:
+        if self.patient_user_info:
+            if self.patient_user_info.first_name and self.patient_user_info.last_name:
+                return (
+                    self.patient_user_info.first_name
+                    + " "
+                    + self.patient_user_info.last_name
+                )
+        if self.name:
+            return self.name
+        return f"Patient {self.id}"
 
 
 class PaginatedPatients(PaginatedResults):

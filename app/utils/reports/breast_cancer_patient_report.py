@@ -15,15 +15,14 @@ from reportlab.platypus import (
 )
 
 from app.models.breast_cancer_patient_models import FEATURE_NAMES, GetPatientResponse
-from app.utils.reports.report_utils import get_patient_title
 
 
-def _header_footer(canvas: Canvas, doc):
+def _header_footer(canvas: Canvas):
     width, height = LETTER
 
     # Header bar
     canvas.saveState()
-    canvas.setFillColor(colors.HexColor("#0ea5e9"))  # sky-600
+    canvas.setFillColor(colors.HexColor("#319795"))
     canvas.rect(0, height - 0.6 * inch, width, 0.6 * inch, fill=1, stroke=0)
 
     # App name (left)
@@ -36,12 +35,6 @@ def _header_footer(canvas: Canvas, doc):
     canvas.drawRightString(
         width - 0.5 * inch, height - 0.4 * inch, datetime.now().strftime("%b %d, %Y")
     )
-
-    # Footer
-    canvas.setFillColor(colors.HexColor("#334155"))  # slate-700
-    canvas.setFont("Helvetica", 9)
-    canvas.drawString(0.5 * inch, 0.4 * inch, "Confidential – For clinical use only")
-    canvas.drawRightString(width - 0.5 * inch, 0.4 * inch, f"Page {doc.page}")
 
     canvas.restoreState()
 
@@ -111,18 +104,9 @@ def _fmt(val, suffix: str = "") -> str | None:
     return f"{val}{suffix}"
 
 
-def build_patient_report_pdf(patient: GetPatientResponse) -> bytes:
+def build_patient_report_pdf(patient: GetPatientResponse, patient_title: str) -> bytes:
     buf = BytesIO()
-    patient_title = get_patient_title(
-        first_name=patient.patient_user_info.first_name
-        if patient.patient_user_info
-        else None,
-        last_name=patient.patient_user_info.last_name
-        if patient.patient_user_info
-        else None,
-        name=patient.name,
-        id=patient.id,
-    )
+
     title = f"Breast Cancer Patient Report: {patient_title}"
     doc = SimpleDocTemplate(
         buf,
