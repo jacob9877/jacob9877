@@ -26,6 +26,7 @@ from app.routers.patient_portal import (
     breast_cancer_patient_portal,
     pediatric_appendicitis_patient_portal,
 )
+from app.routers.reports import breast_cancer_patient_reports
 
 app = FastAPI(
     root_path="/v2",  # root_path must match the API Gateway stage name
@@ -70,6 +71,7 @@ app.include_router(conversations.router)
 app.include_router(chat.router)
 app.include_router(breast_cancer_patient_portal.router)
 app.include_router(pediatric_appendicitis_patient_portal.router)
+app.include_router(breast_cancer_patient_reports.router)
 
 
 app.add_middleware(

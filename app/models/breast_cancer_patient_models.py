@@ -1,16 +1,14 @@
-import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.common_models import (
     ApprovalStatus,
     EmailConstrained,
     PaginatedResults,
-    PatientBase,
     StrStripWhitespace,
 )
-from app.models.user_models import UserSummary
+from app.models.patient_models import PatientBase, PatientUserInfo
 from app.utils.medical import calculate_bmi
 
 
@@ -102,6 +100,11 @@ class Predictions(BaseModel):
         ..., description="Diagnosis: 0 for benign, 1 for malignant", example=1
     )
 
+    def get_diagnosis_text(self):
+        if self.diagnosis == 0:
+            return "benign"
+        return "malignant"
+
 
 class Approvals(BaseModel):
     diagnosis_approval_status: ApprovalStatus | None = None
@@ -112,16 +115,7 @@ class Patient(PatientBase, FeaturesAndDemographics, Predictions, Approvals):
     """Database model for breast_cancer_patients table"""
 
 
-class GetPatientResponse(Patient):
-    patient_user_info: UserSummary | None = None
-
-    @field_validator("patient_user_info", mode="before")
-    @classmethod
-    def load_json_object(cls, value: Any) -> Any:
-        """If patient_user_info comes in as stringified JSON, parse it first."""
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
+class GetPatientResponse(Patient, PatientUserInfo): ...
 
 
 class PaginatedPatients(PaginatedResults):

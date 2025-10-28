@@ -5,7 +5,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
-from app.models.common_models import ResponseModel, SetPatientEmailRequest
+from app.models.common_models import ResponseModel
+from app.models.patient_models import SetPatientEmailRequest
 from app.models.pediatric_appendicitis_patient_models import (
     FEATURE_NAMES,
     Approvals,

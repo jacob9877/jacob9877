@@ -1,17 +1,15 @@
-import json
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.common_models import (
     ApprovalStatus,
     EmailConstrained,
     PaginatedResults,
-    PatientBase,
     StrStripWhitespace,
 )
-from app.models.user_models import UserSummary
+from app.models.patient_models import PatientBase, PatientUserInfo
 from app.utils.medical import (
     calculate_alvarado_score,
     calculate_bmi,
@@ -53,8 +51,7 @@ class PresignedUpload(BaseModel):
     fields: PresignedPostFields
 
 
-class Features(BaseModel):
-    # Demographic
+class DemographicFeatures(BaseModel):
     Age: float = Field(gt=0, example=12.68)
     Sex: Literal["male", "female"] = Field(example="female")
     Height: float = Field(gt=0, example=148.0, description="Height in centimeters (cm)")
@@ -65,7 +62,16 @@ class Features(BaseModel):
         description="Weight in kilograms (kg) / Height in meters (m)",
     )
 
-    # Scoring
+    @model_validator(mode="before")
+    @classmethod
+    def fill_bmi(cls, data: Any) -> Any:
+        # Check for truthy height and weight because this executes before validating height and weight were actually provided
+        if data.get("Height") and data.get("Weight"):
+            data["BMI"] = calculate_bmi(data["Height"], data["Weight"])
+        return data
+
+
+class ScoringFeatures(BaseModel):
     Alvarado_Score: int = Field(
         gte=0,
         lte=10,
@@ -79,7 +85,17 @@ class Features(BaseModel):
         description="Clinical scoring system, value from 0 to 10",
     )
 
-    # Clinical
+    @model_validator(mode="before")
+    @classmethod
+    def fill_scores(cls, data: Any) -> Any:
+        data["Alvarado_Score"] = calculate_alvarado_score(data)
+        data["Paedriatic_Appendicitis_Score"] = calculate_pediatric_appendicits_score(
+            data
+        )
+        return data
+
+
+class ClinicalFeatures(BaseModel):
     Peritonitis: Literal["no", "local", "generalized"] = Field(
         example="no",
         description="Spasm of abdominal wall muscles detected on palpation, usually a result of inflammation",
@@ -125,7 +141,8 @@ class Features(BaseModel):
         example="normal", description="Characteristics of bowel movements"
     )
 
-    # Laboratory
+
+class LaboratoryFeatures(BaseModel):
     WBC_Count: float = Field(
         gte=0,
         example=7.70,
@@ -181,7 +198,15 @@ class Features(BaseModel):
         description="White blood cells in urine; Leucocytes in urine, e.g., in case of infection",
     )
 
-    # Ultrasound (none required except US_Performed)
+    @model_validator(mode="before")
+    @classmethod
+    def fill_neutrophilia(cls, data: Any) -> Any:
+        if data.get("Neutrophil_Percentage", None) is not None:
+            data["Neutrophilia"] = calculate_neutrophilia(data["Neutrophil_Percentage"])
+        return data
+
+
+class UltrasoundFeatures(BaseModel):
     US_Performed: Literal["yes", "no"] = Field(
         example="yes",
         description="If an abdominal ultrasonography was performed or not",
@@ -270,16 +295,14 @@ class Features(BaseModel):
     )
     # Gynecological_Findings not accepted due to it having no restrictions on its value
 
-    @model_validator(mode="before")
-    @classmethod
-    def calculate_scores(cls, data: Any) -> Any:
-        data["BMI"] = calculate_bmi(data["Height"], data["Weight"])
-        data["Neutrophilia"] = calculate_neutrophilia(data["Neutrophil_Percentage"])
-        data["Alvarado_Score"] = calculate_alvarado_score(data)
-        data["Paedriatic_Appendicitis_Score"] = calculate_pediatric_appendicits_score(
-            data
-        )
-        return data
+
+class Features(
+    DemographicFeatures,
+    ScoringFeatures,
+    ClinicalFeatures,
+    LaboratoryFeatures,
+    UltrasoundFeatures,
+): ...
 
 
 FEATURE_NAMES = list(Features.model_fields.keys())
@@ -318,16 +341,7 @@ class ImageResponse(ImageBase):
     created_at: datetime
 
 
-class GetPatientResponse(Patient):
-    patient_user_info: UserSummary | None = None
-
-    @field_validator("patient_user_info", mode="before")
-    @classmethod
-    def load_json_object(cls, value: Any) -> Any:
-        """If patient_user_info comes in as stringified JSON, parse it first."""
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
+class GetPatientResponse(Patient, PatientUserInfo): ...
 
 
 class GetPatientResponseWithImages(GetPatientResponse):

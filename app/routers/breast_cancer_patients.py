@@ -8,6 +8,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Response,
     Security,
     UploadFile,
     status,
@@ -21,7 +22,8 @@ from app.models.breast_cancer_patient_models import (
     PaginatedPatients,
     UpsertPatientRequest,
 )
-from app.models.common_models import ResponseModel, SetPatientEmailRequest
+from app.models.common_models import ResponseModel
+from app.models.patient_models import SetPatientEmailRequest
 from app.models.user_models import User, UserSummary
 from app.utils.aws import bulk_send_message_to_sqs, get_predictions
 from app.utils.db import (
@@ -37,6 +39,7 @@ from app.utils.dependencies import (
 )
 from app.utils.file_parser import parse_csv
 from app.utils.pagination import decode_cursor, encode_cursor
+from app.utils.reports.breast_cancer_patient_report import build_patient_report_pdf
 
 router = APIRouter(
     prefix="/breast-cancer-patients",
@@ -654,6 +657,7 @@ def delete_patients(
     dependencies=[
         Depends(validate_breast_cancer_patient_id),
     ],
+    deprecated=True,
 )
 async def set_patient_email(
     patient_id: int,
@@ -677,4 +681,19 @@ async def set_patient_email(
 
     return ResponseModel[GetPatientResponse](
         data=inserted_patient, detail="Successfully assigned email"
+    )
+
+
+@router.get("/{patient_id}/report")
+def get_patient_report(
+    patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
+):
+    report_bytes = build_patient_report_pdf(patient)
+    filename = "Patient Report"
+    return Response(
+        content=report_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="breast_cancer_patient_report_{filename}.pdf"'
+        },
     )
