@@ -340,21 +340,21 @@ async def insert_pending_email(
     cursor.execute(operation, params)
     pa_row = cursor.fetchone()
 
-    # If the email is pending in either table
-    if bc_row or pa_row:
-        # If it's pending in a patient record different than the target one, error
-        if (
-            target_patient_table == "breast_cancer_patients"
-            and bc_row["id"] != target_patient_id
-        ) or (
-            target_patient_table == "pediatric_appendicitis_patients"
-            and pa_row["id"] != target_patient_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email is already pending in another patient",
-            )
-        # Otherwise the email is pending in the same patient record and this is a re-insert - keep going
+    # If the email is pending in a patient record different than the target one, error
+    if (
+        bc_row
+        and target_patient_table == "breast_cancer_patients"
+        and bc_row["id"] != target_patient_id
+    ) or (
+        pa_row
+        and target_patient_table == "pediatric_appendicitis_patients"
+        and pa_row["id"] != target_patient_id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already pending in another patient",
+        )
+    # Otherwise the email is pending in the same patient record and this is a re-insert - keep going
 
     # Check if a user account exists with this email:
     #   - Check for a user with the email
