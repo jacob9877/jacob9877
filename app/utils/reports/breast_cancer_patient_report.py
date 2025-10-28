@@ -17,7 +17,7 @@ from reportlab.platypus import (
 from app.models.breast_cancer_patient_models import FEATURE_NAMES, GetPatientResponse
 
 
-def _header_footer(canvas: Canvas):
+def _header_footer(canvas: Canvas, doc):
     width, height = LETTER
 
     # Header bar
