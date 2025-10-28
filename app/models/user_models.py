@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel, Field, constr, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
 from app.models.common_models import EmailConstrained, StrStripWhitespace
@@ -30,7 +30,7 @@ class RoleAndCondition(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    email: EmailConstrained = constr(strip_whitespace=True, to_lower=True)
+    email: EmailConstrained
 
 
 class PasswordResetConfirm(BaseModel):

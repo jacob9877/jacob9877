@@ -685,7 +685,24 @@ async def set_patient_email(
     )
 
 
-@router.get("/{patient_id}/report")
+@router.get(
+    "/{patient_id}/report",
+    summary="Get breast cancer patient report",
+    description="Generate a PDF report about the requested breast cancer patient.",
+    response_class=Response(media_type="application/pdf"),
+    response_description="PDF content of the report as an attachment",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to generate the requested patient's report",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+    },
+)
 def get_patient_report(
     patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
 ):
