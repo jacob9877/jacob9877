@@ -689,11 +689,13 @@ def get_patient_report(
     patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
 ):
     report_bytes = build_patient_report_pdf(patient)
-    filename = "Patient Report"
+    with open("sample.pdf", "wb") as file:
+        file.write(report_bytes)
+    filename = "Patient_Report"
     return Response(
         content=report_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="breast_cancer_patient_report_{filename}.pdf"'
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{filename}",
         },
     )
