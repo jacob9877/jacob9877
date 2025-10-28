@@ -1,7 +1,8 @@
 import json
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing_extensions import Self
 
 from app.models.common_models import EmailConstrained, StrStripWhitespace, Timestamps
 from app.models.user_models import UserSummary
@@ -17,6 +18,13 @@ class PatientBase(Timestamps):
         default=None, example="user@example.com"
     )
     name: StrStripWhitespace | None = Field(default=None, example="John Doe")
+
+    @model_validator(mode="after")
+    def at_most_one_nonnull(self) -> Self:
+        """Ensure at most one of user_id and pending_email are non-null"""
+        if self.user_id and self.pending_email:
+            raise ValueError("user_id and pending_email cannot both be non-null")
+        return self
 
 
 class PatientUserInfo(BaseModel):
