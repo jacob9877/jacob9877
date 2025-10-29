@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Security, status
+from fastapi import APIRouter, Body, Depends, Security, status
 from mysql.connector.cursor import MySQLCursorDict
 
 from app.models.approvals_models import PostBreastCancerApproval
@@ -35,12 +35,12 @@ router = APIRouter(
 @router.post(
     "",
     summary="Set diagnosis approval status",
-    description="Set or reset the status of the diagnosis approval. Only provide a value for the approvals you actually wish to modify. Setting an approval as null in the request body will actually reset the approval status to NULL",
+    description="Set or reset the status of the diagnosis approval. Only provide a value for the approvals you actually wish to modify. Setting an approval as null in the request body will actually reset the approval status to NULL. Valid values are 'approved', 'rejected', and null.",
     status_code=status.HTTP_204_NO_CONTENT,
     response_description="Nothing",
 )
 def post_approval(
-    approval_request: PostBreastCancerApproval,
+    approval_request: PostBreastCancerApproval = Body(...),
     patient: Patient = Depends(validate_breast_cancer_patient_id),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):

@@ -1,6 +1,7 @@
 import bcrypt
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
     Request,
@@ -38,10 +39,10 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post(
     "/login",
-    summary="Log a user in",
+    summary="Login",
     description="Logs a user in by verifying their email and password. Returns an access token and sets a refresh token cookie upon success.",
     response_model=ResponseModel[LoginResponse],
-    response_description="Returns an access token",
+    response_description="An access token",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_400_BAD_REQUEST: {
@@ -55,8 +56,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     },
 )
 def login(
-    login_request: LoginRequest,
     response: Response,
+    login_request: LoginRequest = Body(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     user = get_user_by_email(cursor, login_request.email)
@@ -96,9 +97,9 @@ def login(
 @router.get(
     "/refresh",
     summary="Refresh an access token",
-    description="Given a refresh token returns a new access token",
+    description="Given a refresh token, generates a new access token",
     response_model=ResponseModel[RefreshResponse],
-    response_description="Returns a new access token",
+    response_description="A new access token",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_401_UNAUTHORIZED: {
@@ -143,8 +144,8 @@ def refresh(
 
 @router.post(
     "/logout",
-    summary="Log a user out",
-    description="Log a user out by clearing their refresh cookie",
+    summary="Logout",
+    description="Logout by clearing refresh cookie",
     response_description="Nothing",
     status_code=status.HTTP_204_NO_CONTENT,
 )
@@ -155,10 +156,10 @@ def logout(response: Response):
 
 @router.get(
     "/me",
-    summary="Get current user info",
+    summary="Me",
     description="Get info about the current user using their access token",
     response_model=ResponseModel[MeResponse],
-    response_description="Returns some information about the current user",
+    response_description="Some info about the current user",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_401_UNAUTHORIZED: {

@@ -1,20 +1,48 @@
-import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 
-from app.models.common_models import ApprovalStatus, PaginatedResults, PatientBase
-from app.models.user_models import UserSummary
+from app.models.common_models import (
+    ApprovalStatus,
+    EmailConstrained,
+    PaginatedResults,
+    StrStripWhitespace,
+)
+from app.models.patient_models import PatientBase, PatientUserInfo
+from app.utils.medical import calculate_bmi
 
 
 class Features(BaseModel):
-    """Features that feed into the breast cancer diagnosis prediction"""
-
-    mean_radius: float = Field(..., gt=0, example=13.54)
-    mean_texture: float = Field(..., gt=0, example=14.36)
-    mean_perimeter: float = Field(..., gt=0, example=87.46)
-    mean_area: float = Field(..., gt=0, example=566.3)
-    mean_smoothness: float = Field(..., gt=0, example=0.09779)
+    mean_radius: float = Field(
+        ...,
+        gt=0,
+        example=13.54,
+        description="The radius of an individual nucleus is measured by averaging the length of the radial line segments defined by the centroid of the snake and the individual snake points around the nucleus. Measured in pixels.",
+    )
+    mean_texture: float = Field(
+        ...,
+        gt=0,
+        example=14.36,
+        description="The texture of cell nucleus is measured by finding the variance of the gray scale intensities in the component pixels. Measured in gray-level intensity.",
+    )
+    mean_perimeter: float = Field(
+        ...,
+        gt=0,
+        example=87.46,
+        description="The nuclear perimeter of a cell nucleus is the total distance between the snake points. Measured in pixels.",
+    )
+    mean_area: float = Field(
+        ...,
+        gt=0,
+        example=566.3,
+        description="Nuclear area is measured simply by counting the number of pixels on the interior of the snake and adding one-half of the pixels in the perimeter. Measured in pixels squared.",
+    )
+    mean_smoothness: float = Field(
+        ...,
+        gt=0,
+        example=0.09779,
+        description="The smoothness of a nuclear contour is quantified by measuring the difference between the length of the radial line and the mean length of the lines surrounding it. Dimensionless quantity.",
+    )
 
 
 FEATURE_NAMES = list(Features.model_fields.keys())
@@ -37,6 +65,13 @@ class Demographics(BaseModel):
         description="Weight in kilograms (kg) / Height in meters (m)",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def calculate_bmi(cls, data: Any) -> Any:
+        if data.get("Height") and data.get("Weight"):
+            data["BMI"] = calculate_bmi(data["Height"], data["Weight"])
+        return data
+
 
 DEMOGRAPHICS_NAMES = list(Demographics.model_fields.keys())
 
@@ -46,12 +81,12 @@ class FeaturesAndDemographics(Features, Demographics):
 
 
 class UpsertPatientRequest(FeaturesAndDemographics):
-    name: str | None = Field(
+    name: StrStripWhitespace | None = Field(
         default=None,
         example="John Doe",
         description="Optionally set a name/nickname for the patient, this will be overriden if the patient has an account",
     )
-    email: EmailStr | None = Field(default=None, example="user@example.com")
+    email: EmailConstrained | None = Field(default=None, example="user@example.com")
 
 
 class AddPatientsRequest(BaseModel):
@@ -65,6 +100,11 @@ class Predictions(BaseModel):
         ..., description="Diagnosis: 0 for benign, 1 for malignant", example=1
     )
 
+    def get_diagnosis_text(self):
+        if self.diagnosis == 0:
+            return "benign"
+        return "malignant"
+
 
 class Approvals(BaseModel):
     diagnosis_approval_status: ApprovalStatus | None = None
@@ -75,16 +115,18 @@ class Patient(PatientBase, FeaturesAndDemographics, Predictions, Approvals):
     """Database model for breast_cancer_patients table"""
 
 
-class GetPatientResponse(Patient):
-    patient_user_info: UserSummary | None = None
-
-    @field_validator("patient_user_info", mode="before")
-    @classmethod
-    def load_json_object(cls, value: Any) -> Any:
-        """If patient_user_info comes in as stringified JSON, parse it first."""
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
+class GetPatientResponse(Patient, PatientUserInfo):
+    def get_patient_title(self) -> str:
+        if self.patient_user_info:
+            if self.patient_user_info.first_name and self.patient_user_info.last_name:
+                return (
+                    self.patient_user_info.first_name
+                    + " "
+                    + self.patient_user_info.last_name
+                )
+        if self.name:
+            return self.name
+        return f"Patient {self.id}"
 
 
 class PaginatedPatients(PaginatedResults):

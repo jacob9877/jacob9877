@@ -2,12 +2,23 @@ import os
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Security, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Security,
+    status,
+)
 from mysql.connector.cursor import MySQLCursorDict
 
-from app.models.common_models import ResponseModel, SetPatientEmailRequest
+from app.models.common_models import ResponseModel
+from app.models.patient_models import SetPatientEmailRequest
 from app.models.pediatric_appendicitis_patient_models import (
     FEATURE_NAMES,
+    Approvals,
     Features,
     GetPatientResponse,
     GetPatientResponseWithImages,
@@ -68,12 +79,12 @@ def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
     status_code=status.HTTP_201_CREATED,
     response_model=list[PresignedUpload],
     response_model_by_alias=True,
-    response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request)",
+    response_description="List of: upload id, pre-signed POST URL, and fields (these should be included as form data in the POST request to S3)",
 )
 def create_presigned_uploads(
-    request: PostImagesRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+    request: PostImagesRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     presigned_uploads: list[PresignedUpload] = []
     for file_type in request.file_types:
@@ -167,22 +178,57 @@ def _insert_patient(
     return patient
 
 
+def package_patient_with_images(
+    cursor: MySQLCursorDict, get_patient_response: GetPatientResponse
+) -> GetPatientResponseWithImages:
+    # Fetch any images associated with the patient
+    operation = """
+        SELECT upload_id, file_type, name, created_at
+        FROM pediatric_appendicitis_images
+        WHERE patient_id=%s
+    """
+    params = (get_patient_response.id,)
+    cursor.execute(operation, params)
+    rows = cursor.fetchall()
+
+    # Build upload_id, pre-signed url pairs for each image
+    images: list[ImageResponse] = []
+    for row in rows:
+        s3_key = build_s3_image_key(
+            get_patient_response.clinician_user_id, row["upload_id"], row["file_type"]
+        )
+        presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
+        images.append(ImageResponse(**row, url=presigned_url))
+
+    patient_with_images = GetPatientResponseWithImages(
+        **get_patient_response.model_dump(), images=images
+    )
+
+    return patient_with_images
+
+
 @router.post(
     "",
-    summary="Add a pediatric appendicitis patient",
+    summary="Add pediatric appendicitis patient",
     description="Given the features and upload_ids of any associated images, add and predict for a new pediatric appendicitis patient.",
     response_model=ResponseModel[GetPatientResponseWithImages],
-    response_description="Patient information along with pre-signed URLs for any associated images",
+    response_description="The new pediatric appendicitis patient plus pre-signed URLs for associated images",
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "Email is invalid due to data circumstances",
+        }
+    },
 )
-def add_patient(
-    add_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+async def add_patient(
+    add_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
-        for upload_id in add_patient_request.image_upload_ids
+        _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
+        for image_upload in add_patient_request.image_uploads
     ]
 
     body = {
@@ -199,39 +245,33 @@ def add_patient(
         predictions=predictions,
     )
 
-    if add_patient_request.image_upload_ids:
+    for image_upload in add_patient_request.image_uploads:
         # Update the images to link them to the new patient
-        placeholders = ", ".join(["%s"] * len(add_patient_request.image_upload_ids))
-        operation = f"""
+        operation = """
             UPDATE pediatric_appendicitis_images
-            SET patient_id = %s
-            WHERE upload_id IN ({placeholders}) AND user_id = %s
+            SET patient_id = %s, name = %s
+            WHERE upload_id = %s AND user_id = %s
         """
         params = (
             new_patient.id,
-            *add_patient_request.image_upload_ids,
+            image_upload.name,
+            image_upload.upload_id,
             current_user.id,
         )
         cursor.execute(operation, params)
 
     if add_patient_request.email:
-        insert_pending_email(
+        await insert_pending_email(
             cursor=cursor,
             email=add_patient_request.email,
             target_patient_id=new_patient.id,
             target_patient_table="pediatric_appendicitis_patients",
+            clinician_first_name=current_user.first_name,
+            clinician_last_name=current_user.last_name,
         )
 
-    images: list[ImageResponse] = []
-    for upload_id, image_s3_uri in zip(
-        add_patient_request.image_upload_ids, image_s3_uris
-    ):
-        presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
-        images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
-
-    patient_with_images = GetPatientResponseWithImages(
-        **new_patient.model_dump(), images=images
-    )
+    # Package the images nicely to return
+    patient_with_images = package_patient_with_images(cursor, new_patient)
 
     # Send the new patient info to SQS for explanation processing
     features = {
@@ -255,14 +295,14 @@ def add_patient(
 
 @router.get(
     "/{patient_id}",
-    summary="Get a patient by ID",
+    summary="Get pediatric appendicitis patient",
     response_model=ResponseModel[GetPatientResponseWithImages],
-    response_description="Returns the pediatric appendicitis patient with the provided ID, with pre-signed URLs for any images associated with the patient",
+    response_description="The requested pediatric appendicitis patient plus pre-signed URLs for associated images",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to access the requested patient",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
@@ -271,31 +311,10 @@ def add_patient(
     },
 )
 def get_patient(
-    patient_id: int = Path(..., description="ID of the patient to get"),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
-    current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    # Fetch any images associated with the patient
-    operation = """
-        SELECT upload_id, file_type
-        FROM pediatric_appendicitis_images
-        WHERE patient_id=%s
-    """
-    params = (patient_id,)
-    cursor.execute(operation, params)
-    rows = cursor.fetchall()
-
-    # Build upload_id, pre-signed url pairs for each image
-    images: list[ImageResponse] = []
-    for row in rows:
-        s3_key = build_s3_image_key(current_user.id, row["upload_id"], row["file_type"])
-        presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
-        images.append(ImageResponse(upload_id=row["upload_id"], url=presigned_url))
-
-    patient_with_images = GetPatientResponseWithImages(
-        **patient.model_dump(), images=images
-    )
+    patient_with_images = package_patient_with_images(cursor, patient)
 
     return ResponseModel[GetPatientResponseWithImages](
         data=patient_with_images,
@@ -305,13 +324,13 @@ def get_patient(
 
 @router.get(
     "",
-    summary="Get pediatric appendicitis patients for the logged-in user (cursor-based pagination)",
+    summary="Get pediatric appendicitis patients",
     description=(
         "Retrieves pediatric appendicitis patients for the current user (by the provided access token) using cursor-based pagination, "
         "sorted by most recently updated."
     ),
     response_model=ResponseModel[PaginatedPatients],
-    response_description="Returns a page of patients plus a next_cursor if more data exists",
+    response_description="A page of patients of max size `limit` plus a `next_cursor` if more data exists",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_400_BAD_REQUEST: {
@@ -333,8 +352,8 @@ def get_pediatric_appendicitis_patients_paginated(
         le=100,
         description="Max number of patients to return (1–100)",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Order is (updated_at DESC, id DESC).
     # For "next page", fetch rows strictly "after" the cursor in that order:
@@ -419,18 +438,18 @@ def get_pediatric_appendicitis_patients_paginated(
 
 @router.delete(
     "/{patient_id}",
-    summary="Delete a patient by ID",
-    description="Delete the patient with the provided patient ID",
+    summary="Delete pediatric appendicitis patient",
+    description="Delete the patient with the provided ID",
     status_code=status.HTTP_204_NO_CONTENT,
     response_description="Nothing",
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to delete the requested patient",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
-            "description": "Patient with provided ID not found",
+            "description": "Patient not found",
         },
     },
     dependencies=[
@@ -438,7 +457,7 @@ def get_pediatric_appendicitis_patients_paginated(
     ],
 )
 def delete_patient(
-    patient_id: int,
+    patient_id: int = Path(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Delete the patient record
@@ -462,24 +481,20 @@ def _update_patient(
     predictions: Predictions,
 ) -> GetPatientResponse:
     predictions_keys = list(Predictions.model_fields.keys())
-    columns = [
-        "name",
-        *FEATURE_NAMES,
-        *predictions_keys,
-    ]
+    approvals_keys = list(Approvals.model_fields.keys())
+    columns = ["name", *FEATURE_NAMES, *predictions_keys, *approvals_keys]
     set_clause = ", ".join(f"{column}=%s" for column in columns)
     operation = f"""
         UPDATE pediatric_appendicitis_patients
         SET {set_clause}
         WHERE id=%s
     """
-    params = (
-        (name,)
-        + tuple(getattr(features, name) for name in FEATURE_NAMES)
-        + tuple(
-            getattr(predictions, prediction_key) for prediction_key in predictions_keys
-        )
-        + (patient_id,)
+    params = tuple(
+        [name]
+        + [getattr(features, name) for name in FEATURE_NAMES]
+        + [getattr(predictions, prediction_key) for prediction_key in predictions_keys]
+        + ([None] * len(approvals_keys))
+        + [patient_id]
     )
     cursor.execute(operation, params)
 
@@ -490,32 +505,65 @@ def _update_patient(
 
 @router.put(
     "/{patient_id}",
-    summary="Update a patient (and re-predict)",
+    summary="Update pediatric appendicitis patient",
     description="Provide the new patient info; the predictions are always re-predicted and saved.",
     response_model=ResponseModel[GetPatientResponseWithImages],
-    response_description="Returns the updated patient with pre-signed URLs for any images",
+    response_description="The updated pediatric appendicitis patient plus pre-signed URLs for associated images",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to update the requested patient",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
             "description": "Patient not found",
         },
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "Email is invalid due to data circumstances",
+        },
     },
 )
-def update_patient(
-    patient_id: int,
-    update_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+async def update_patient(
+    patient_id: int = Path(...),
+    update_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    image_upload_ids = update_patient_request.image_upload_ids or []
+    # Deal with the email first in case there is a conflict we can return quickly
+    if update_patient_request.email:
+        await insert_pending_email(
+            cursor=cursor,
+            email=update_patient_request.email,
+            target_patient_id=patient_id,
+            target_patient_table="pediatric_appendicitis_patients",
+            clinician_first_name=current_user.first_name,
+            clinician_last_name=current_user.last_name,
+        )
+
+    patient_with_images = package_patient_with_images(cursor, patient)
+    repredict: bool = False
+    # If any feature value has changed, re-predict
+    if any(
+        getattr(patient_with_images, feature)
+        != getattr(update_patient_request.features, feature)
+        for feature in FEATURE_NAMES
+    ):
+        repredict = True
+    # If the new upload ids are not the same as the existing ones, re-predict.
+    if set(image.upload_id for image in patient_with_images.images) != set(
+        image.upload_id for image in update_patient_request.image_uploads
+    ):
+        repredict = True
 
     # If the user provided images
-    if image_upload_ids:
+    if update_patient_request.image_uploads:
+        image_upload_ids = [
+            image_upload.upload_id
+            for image_upload in update_patient_request.image_uploads
+        ]
         # Delete all images except those images
         placeholders = ",".join(["%s"] * len(image_upload_ids))
         operation = f"""
@@ -534,19 +582,24 @@ def update_patient(
         params = (patient_id, current_user.id)
         cursor.execute(operation, params)
 
-    image_s3_uris = [
-        _get_s3_uri_for_upload_id(cursor, upload_id, current_user.id)
-        for upload_id in image_upload_ids
-    ]
+    if repredict:
+        image_s3_uris = [
+            _get_s3_uri_for_upload_id(cursor, image_upload.upload_id, current_user.id)
+            for image_upload in update_patient_request.image_uploads
+        ]
 
-    body = {
-        "features": update_patient_request.features.model_dump(),
-        "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
-    }
-    result = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
-    predictions = Predictions(**result)
+        body = {
+            "features": update_patient_request.features.model_dump(),
+            "image_s3_uris": [uri.model_dump() for uri in image_s3_uris],
+        }
+        result = get_predictions(body, SAGEMAKER_ENDPOINT_NAME)
+        predictions = Predictions(**result)
+    else:
+        predictions = Predictions.model_validate(
+            patient_with_images, from_attributes=True
+        )
 
-    new_patient = _update_patient(
+    updated_patient = _update_patient(
         cursor=cursor,
         patient_id=patient_id,
         name=update_patient_request.name,
@@ -554,37 +607,22 @@ def update_patient(
         predictions=predictions,
     )
 
-    if update_patient_request.email:
-        insert_pending_email(
-            cursor=cursor,
-            email=update_patient_request.email,
-            target_patient_id=new_patient.id,
-            target_patient_table="pediatric_appendicitis_patients",
-        )
-
-    if image_upload_ids:
+    for image_upload in update_patient_request.image_uploads:
         # Update the images to link them to the new patient
-        placeholders = ", ".join(["%s"] * len(image_upload_ids))
-        operation = f"""
+        operation = """
             UPDATE pediatric_appendicitis_images
-            SET patient_id = %s
-            WHERE upload_id IN ({placeholders}) AND user_id = %s
+            SET patient_id = %s, name = %s
+            WHERE upload_id = %s AND user_id = %s
         """
         params = (
-            new_patient.id,
-            *image_upload_ids,
+            patient_id,
+            image_upload.name,
+            image_upload.upload_id,
             current_user.id,
         )
         cursor.execute(operation, params)
 
-    images: list[ImageResponse] = []
-    for upload_id, image_s3_uri in zip(image_upload_ids, image_s3_uris):
-        presigned_url = create_presigned_url(image_s3_uri.bucket, image_s3_uri.key)
-        images.append(ImageResponse(upload_id=upload_id, url=presigned_url))
-
-    patient_with_images = GetPatientResponseWithImages(
-        **new_patient.model_dump(), images=images
-    )
+    patient_with_images = package_patient_with_images(cursor, updated_patient)
 
     return ResponseModel[GetPatientResponseWithImages](
         data=patient_with_images,
@@ -594,19 +632,18 @@ def update_patient(
 
 @router.delete(
     "",
-    summary="Delete multiple patients by IDs",
-    description="Deletes the patients whose IDs are provided",
-    response_model=ResponseModel[list[int]],
-    response_description="Returns the list of IDs that were deleted",
-    status_code=status.HTTP_200_OK,
+    summary="Delete pediatric appendicitis patients",
+    description="Delete the patients with the provided IDs",
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to delete one or more specified patients",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
-            "description": "One or more patient IDs not found",
+            "description": "One or more patients not found",
         },
     },
 )
@@ -617,8 +654,8 @@ def delete_patients(
         description="List of patient IDs to delete",
         example="ids=1&ids=2&ids=3",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Verify all IDs exist
     placeholders = ",".join(["%s"] * len(patient_ids))
@@ -657,23 +694,20 @@ def delete_patients(
     params = tuple(patient_ids)
     cursor.execute(operation, params)
 
-    return ResponseModel[list[int]](
-        data=patient_ids,
-        detail=f"Deleted {len(patient_ids)} patients successfully",
-    )
+    return
 
 
 @router.post(
     "/{patient_id}/email",
-    summary="Set a patient's email",
+    summary="Set pediatric appendicitis patient's email",
     description="Set a patient's email. This will either set it as pending in the patient record or actually link the patient user account to it",
-    response_model=ResponseModel[GetPatientResponse],
-    response_description="The updated patient info",
+    response_model=ResponseModel[GetPatientResponseWithImages],
+    response_description="The updated patient info with images",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to edit the requested patient's email",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
@@ -681,30 +715,36 @@ def delete_patients(
         },
         status.HTTP_409_CONFLICT: {
             "model": ResponseModel[None],
-            "description": "Conflict when linking email",
+            "description": "Email is invalid due to data circumstances",
         },
     },
     dependencies=[
         Depends(validate_pediatric_appendicitis_patient_id),
     ],
+    deprecated=True,
 )
-def set_patient_email(
-    patient_id: int,
-    set_patient_email_request: SetPatientEmailRequest,
+async def set_patient_email(
+    patient_id: int = Path(...),
+    set_patient_email_request: SetPatientEmailRequest = Body(...),
+    current_user: User = Depends(get_current_user),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    insert_pending_email(
+    await insert_pending_email(
         cursor=cursor,
         email=set_patient_email_request.email,
         target_patient_id=patient_id,
         target_patient_table="pediatric_appendicitis_patients",
+        clinician_first_name=current_user.first_name,
+        clinician_last_name=current_user.last_name,
     )
 
     # Re-fetch the patient to get it with the updated email and potentially user information
-    inserted_patient = get_pediatric_appendicitis_patient_by_id(
+    updated_patient = get_pediatric_appendicitis_patient_by_id(
         cursor=cursor, patient_id=patient_id
     )
 
-    return ResponseModel[GetPatientResponse](
-        data=inserted_patient, detail="Successfully assigned email"
+    patient_with_images = package_patient_with_images(cursor, updated_patient)
+
+    return ResponseModel[GetPatientResponseWithImages](
+        data=patient_with_images, detail="Successfully assigned email"
     )

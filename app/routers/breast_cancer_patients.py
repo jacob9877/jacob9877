@@ -4,15 +4,19 @@ from typing import Literal
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     HTTPException,
+    Path,
     Query,
+    Response,
     Security,
     UploadFile,
     status,
 )
 from mysql.connector.cursor import MySQLCursorDict
+from slugify import slugify
 
 from app.models.breast_cancer_patient_models import (
     FEATURE_NAMES,
@@ -21,7 +25,8 @@ from app.models.breast_cancer_patient_models import (
     PaginatedPatients,
     UpsertPatientRequest,
 )
-from app.models.common_models import ResponseModel, SetPatientEmailRequest
+from app.models.common_models import ResponseModel
+from app.models.patient_models import SetPatientEmailRequest
 from app.models.user_models import User, UserSummary
 from app.utils.aws import bulk_send_message_to_sqs, get_predictions
 from app.utils.db import (
@@ -37,6 +42,7 @@ from app.utils.dependencies import (
 )
 from app.utils.file_parser import parse_csv
 from app.utils.pagination import decode_cursor, encode_cursor
+from app.utils.reports.breast_cancer_patient_report import build_patient_report_pdf
 
 router = APIRouter(
     prefix="/breast-cancer-patients",
@@ -110,6 +116,7 @@ def _add_patients(
         )
         inserted_ids.append(pid)
 
+    # Formulate the return
     placeholders = ",".join(["%s"] * len(inserted_ids))
     operation = f"""
         SELECT
@@ -138,21 +145,25 @@ def _add_patients(
 @router.post(
     "/single",
     summary="Add breast cancer patient",
-    description="Add a breast cancer patient with the patient's email.",
+    description="""
+        Predicts diagnosis, then prediction & patient info are written to database. If any error occurs here, nothing is written.
+        If email is present in request, attempts to either link that patient user account or sends them an invite email.
+        Finally, sends message to SQS for explanation processing.
+    """,
     response_model=ResponseModel[GetPatientResponse],
-    response_description="Returns the newly created breast cancer patient",
+    response_description="The new breast cancer patient",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_409_CONFLICT: {
             "model": ResponseModel[None],
-            "description": "Email is invalid",
+            "description": "Email is invalid due to data circumstances",
         }
     },
 )
-def add_patient(
-    add_patient_request: UpsertPatientRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+async def add_patient(
+    add_patient_request: UpsertPatientRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     new_patient = _add_patients(
         cursor=cursor,
@@ -161,11 +172,13 @@ def add_patient(
     )[0]
 
     if add_patient_request.email:
-        insert_pending_email(
-            cursor,
-            add_patient_request.email,
-            new_patient.id,
-            "breast_cancer_patients",
+        await insert_pending_email(
+            cursor=cursor,
+            email=add_patient_request.email,
+            target_patient_id=new_patient.id,
+            target_patient_table="breast_cancer_patients",
+            clinician_first_name=current_user.first_name,
+            clinician_last_name=current_user.last_name,
         )
 
     # Re-fetch the patient to get it with the updated email and potentially user information
@@ -187,16 +200,26 @@ def add_patient(
 
 @router.post(
     "",
-    summary="Add multiple breast cancer patients",
-    description="Add multiple breast cancer patients with their features and user ID. When trying to add 1 patient send a list with 1 element",
+    summary="Add breast cancer patients",
+    description="""
+        For each patient info to be added: predicts diagnosis, then prediction & patient info are written to database. If any error occurs here, nothing is written.
+        For each email present in the request, attempts to either link that patient user account or sends them an invite email.
+        Finally, sends messages to SQS for explanation processing.
+    """,
     response_model=ResponseModel[list[GetPatientResponse]],
-    response_description="Returns the newly created breast cancer patients",
+    response_description="The new breast cancer patients",
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "One or more emails is invalid due to data circumstances",
+        }
+    },
 )
-def add_patients_json(
-    add_patients_request: AddPatientsRequest,
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
+async def add_patients_json(
+    add_patients_request: AddPatientsRequest = Body(...),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     upsert_patient_requests = [
         UpsertPatientRequest.model_validate(patient_features)
@@ -211,12 +234,15 @@ def add_patients_json(
     for upsert_patient_request, inserted_patient in zip(
         upsert_patient_requests, inserted_patients
     ):
-        insert_pending_email(
-            cursor=cursor,
-            email=upsert_patient_request.email,
-            target_patient_id=inserted_patient.id,
-            target_patient_table="breast_cancer_patients",
-        )
+        if upsert_patient_request.email:
+            await insert_pending_email(
+                cursor=cursor,
+                email=upsert_patient_request.email,
+                target_patient_id=inserted_patient.id,
+                target_patient_table="breast_cancer_patients",
+                clinician_first_name=current_user.first_name,
+                clinician_last_name=current_user.last_name,
+            )
 
     # Send the new patient info to SQS for explanation processing
     messages = [
@@ -232,22 +258,31 @@ def add_patients_json(
 
 @router.post(
     "/csv",
-    summary="Add multiple breast cancer patients via CSV upload",
-    description="Add multiple breast cancer patients with their features and user ID",
+    summary="Add breast cancer patients via CSV upload",
+    description="""
+        Parses the CSV to obtain patient info rows.
+        For each patient info to be added: predicts diagnosis, then prediction & patient info are written to database. If any error occurs here, nothing is written.
+        Then for each email present in the request, attempts to either link that patient user account or sends them an invite email.
+        Finally, sends messages to SQS for explanation processing.
+    """,
     response_model=ResponseModel[list[GetPatientResponse]],
-    response_description="Returns the newly created breast cancer patients",
+    response_description="The new breast cancer patients",
     status_code=status.HTTP_201_CREATED,
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": ResponseModel[None],
             "description": "CSV is invalid",
-        }
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "One or more emails is invalid due to data circumstances",
+        },
     },
 )
-def add_patients_csv(
+async def add_patients_csv(
     file: UploadFile | None = File(None),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     file.file.seek(0)
     content = file.file.read().decode("utf-8")
@@ -264,12 +299,15 @@ def add_patients_csv(
     for upsert_patient_request, inserted_patient in zip(
         upsert_patient_requests, inserted_patients
     ):
-        insert_pending_email(
-            cursor=cursor,
-            email=upsert_patient_request.email,
-            target_patient_id=inserted_patient.id,
-            target_patient_table="breast_cancer_patients",
-        )
+        if upsert_patient_request.email:
+            await insert_pending_email(
+                cursor=cursor,
+                email=upsert_patient_request.email,
+                target_patient_id=inserted_patient.id,
+                target_patient_table="breast_cancer_patients",
+                clinician_first_name=current_user.first_name,
+                clinician_last_name=current_user.last_name,
+            )
 
     # Send the new patient info to SQS for explanation processing
     messages = [
@@ -285,14 +323,15 @@ def add_patients_csv(
 
 @router.get(
     "/{patient_id}",
-    summary="Get a patient by ID",
+    summary="Get breast cancer patient",
+    description="Get a single breast cancer patient by ID",
     response_model=ResponseModel[GetPatientResponse],
-    response_description="Returns the breast cancer patient with the provided ID",
+    response_description="The requested breast cancer patient",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to access the requested patient",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
@@ -310,13 +349,12 @@ def get_patient(
 
 @router.get(
     "",
-    summary="Get breast cancer patients for the logged-in user (cursor-based pagination)",
-    description=(
-        "Retrieves breast cancer patients for the current user (by the provided access token) using cursor-based pagination, "
-        "sorted by most recently updated."
-    ),
+    summary="Get breast cancer patients",
+    description="""
+        Retrieves the current user's breast cancer patients using cursor-based pagination sorted by updated_at descending
+    """,
     response_model=ResponseModel[PaginatedPatients],
-    response_description="Returns a page of patients plus a next_cursor if more data exists",
+    response_description="A page of patients of max size `limit` plus a `next_cursor` if more data exists",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_400_BAD_REQUEST: {
@@ -338,8 +376,8 @@ def get_breast_cancer_patients_paginated(
         le=100,
         description="Max number of patients to return (1–100)",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Order is (updated_at DESC, id DESC).
     # For "next page", fetch rows strictly "after" the cursor in that order:
@@ -426,17 +464,23 @@ def _update_and_repredict(
     cursor: MySQLCursorDict,
     patient_id: int,
     upsert_patient_request: UpsertPatientRequest,
+    repredict: bool,
 ) -> GetPatientResponse:
-    # Re-predict
-    instance = [
-        getattr(upsert_patient_request, feature_name) for feature_name in FEATURE_NAMES
-    ]
-    result = get_predictions({"instances": [instance]}, SAGEMAKER_ENDPOINT_NAME)
+    if repredict:
+        instance = [
+            getattr(upsert_patient_request, feature_name)
+            for feature_name in FEATURE_NAMES
+        ]
+        result = get_predictions({"instances": [instance]}, SAGEMAKER_ENDPOINT_NAME)
 
-    new_diagnosis = result["predictions"][0][0]
+        new_diagnosis = result["predictions"][0][0]
+    else:
+        new_diagnosis = None
 
     upsert_patient_request_json = upsert_patient_request.model_dump(exclude={"email"})
-    columns = ["diagnosis"] + list(upsert_patient_request_json.keys())
+    columns = list(upsert_patient_request_json.keys()) + (
+        ["diagnosis"] if new_diagnosis is not None else []
+    )
     set_clause = ", ".join(f"{column}=%s" for column in columns)
     operation = f"""
         UPDATE breast_cancer_patients
@@ -444,7 +488,9 @@ def _update_and_repredict(
         WHERE id=%s
     """
     params = tuple(
-        [new_diagnosis] + list(upsert_patient_request_json.values()) + [patient_id]
+        list(upsert_patient_request_json.values())
+        + ([new_diagnosis] if new_diagnosis is not None else [])
+        + [patient_id]
     )
     cursor.execute(operation, params)
 
@@ -454,87 +500,62 @@ def _update_and_repredict(
     return updated_patient
 
 
-# @router.post(
-#     "/{patient_id}/repredict",
-#     summary="Re-predict a patient's diagnosis",
-#     description="Re-predicts and saves the patient's diagnosis using the latest model. **No request body.**",
-#     response_model=ResponseModel[GetPatientResponse],
-#     response_description="Returns the updated patient with the new diagnosis",
-#     status_code=status.HTTP_200_OK,
-#     responses={
-#         status.HTTP_403_FORBIDDEN: {
-#             "model": ResponseModel[None],
-#             "description": "Not authorized to perform the requested action",
-#         },
-#         status.HTTP_404_NOT_FOUND: {
-#             "model": ResponseModel[None],
-#             "description": "Patient not found",
-#         },
-#     },
-#     dependencies=[
-#         Depends(validate_breast_cancer_patient_id),
-#     ],
-# )
-# def repredict_patient(
-#     patient_id: int = Path(..., description="ID of the patient to re-predict"),
-#     cursor: MySQLCursorDict = Depends(get_db_cursor),
-# ):
-#     updated_patient = _update_and_repredict(
-#         cursor=cursor,
-#         patient_id=patient_id,
-#     )
-
-#     # Send the new patient info to SQS for explanation processing
-#     messages = [
-#         updated_patient.model_dump(include=set(FEATURE_NAMES))
-#         | {"patient_id": updated_patient.id}
-#     ]
-#     bulk_send_message_to_sqs(queue_url=EXPLANATION_QUEUE_URL, messages=messages)
-
-#     return ResponseModel[GetBreastCancerPatientResponse](
-#         data=updated_patient, detail="Re-predicted successfully"
-#     )
-
-
 @router.put(
     "/{patient_id}",
-    summary="Update a patient (and re-predict)",
-    description="Provide any subset of features to update; the diagnosis is always re-predicted and saved.",
+    summary="Update breast cancer patient",
+    description="""
+        Predicts diagnosis, then prediction & patient info are updated in the database. If any error occurs here, nothing is written.
+        If email is present in request, attempts to either link that patient user account or sends them an invite email.
+        Finally, sends message to SQS for explanation processing.
+    """,
     response_model=ResponseModel[GetPatientResponse],
-    response_description="Returns the updated patient",
+    response_description="The updated breast cancer patient",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to update the requested patient",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
             "description": "Patient not found",
         },
+        status.HTTP_409_CONFLICT: {
+            "model": ResponseModel[None],
+            "description": "Email is invalid due to data circumstances",
+        },
     },
-    dependencies=[
-        Depends(validate_breast_cancer_patient_id),
-    ],
 )
-def update_patient(
-    patient_id: int,
-    update_patient_request: UpsertPatientRequest,
+async def update_patient(
+    patient_id: int = Path(...),
+    update_patient_request: UpsertPatientRequest = Body(...),
+    current_user: User = Depends(get_current_user),
+    patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    updated_patient = _update_and_repredict(
-        cursor=cursor,
-        patient_id=patient_id,
-        upsert_patient_request=update_patient_request,
-    )
-
+    # Deal with the email first in case there is a conflict we can return quickly
     if update_patient_request.email:
-        insert_pending_email(
+        await insert_pending_email(
             cursor=cursor,
             email=update_patient_request.email,
             target_patient_id=patient_id,
             target_patient_table="breast_cancer_patients",
+            clinician_first_name=current_user.first_name,
+            clinician_last_name=current_user.last_name,
         )
+
+    # If any feature value has changed, re-predict. Otherwise if everything is unchanged, don't.
+    repredict = any(
+        getattr(patient, feature) != getattr(update_patient_request, feature)
+        for feature in FEATURE_NAMES
+    )
+
+    updated_patient = _update_and_repredict(
+        cursor=cursor,
+        patient_id=patient_id,
+        upsert_patient_request=update_patient_request,
+        repredict=repredict,
+    )
 
     # Send the new patient info to SQS for explanation processing
     messages = [
@@ -550,19 +571,18 @@ def update_patient(
 
 @router.delete(
     "",
-    summary="Delete multiple patients by IDs",
-    description="Deletes the patients whose IDs are provided",
-    response_model=ResponseModel[list[int]],
-    response_description="Returns the list of IDs that were deleted",
-    status_code=status.HTTP_200_OK,
+    summary="Delete breast cancer patients",
+    description="Delete the patients with the provided IDs",
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to delete one or more specified patients",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
-            "description": "One or more patient IDs not found",
+            "description": "One or more patients not found",
         },
     },
 )
@@ -573,8 +593,8 @@ def delete_patients(
         description="List of patient IDs to delete",
         example="ids=1&ids=2&ids=3",
     ),
-    cursor: MySQLCursorDict = Depends(get_db_cursor),
     current_user: User = Depends(get_current_user),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Verify all IDs exist
     placeholders = ",".join(["%s"] * len(patient_ids))
@@ -613,23 +633,20 @@ def delete_patients(
     params = tuple(patient_ids)
     cursor.execute(operation, params)
 
-    return ResponseModel[list[int]](
-        data=patient_ids,
-        detail=f"Deleted {len(patient_ids)} patients successfully",
-    )
+    return
 
 
 @router.post(
     "/{patient_id}/email",
-    summary="Set a patient's email",
+    summary="Set breast cancer patient's email",
     description="Set a patient's email. This will either set it as pending in the patient record or actually link the patient user account to it",
     response_model=ResponseModel[GetPatientResponse],
-    response_description="The updated patient info",
+    response_description="The updated breast cancer patient",
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ResponseModel[None],
-            "description": "Not authorized to perform the requested action",
+            "description": "Not authorized to edit the requested patient's email",
         },
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
@@ -637,23 +654,27 @@ def delete_patients(
         },
         status.HTTP_409_CONFLICT: {
             "model": ResponseModel[None],
-            "description": "Conflict when linking email",
+            "description": "Email is invalid due to data circumstances",
         },
     },
     dependencies=[
         Depends(validate_breast_cancer_patient_id),
     ],
+    deprecated=True,
 )
-def set_patient_email(
-    patient_id: int,
-    set_patient_email_request: SetPatientEmailRequest,
+async def set_patient_email(
+    patient_id: int = Path(...),
+    set_patient_email_request: SetPatientEmailRequest = Body(...),
+    current_user: User = Depends(get_current_user),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
-    insert_pending_email(
+    await insert_pending_email(
         cursor=cursor,
         email=set_patient_email_request.email,
         target_patient_id=patient_id,
         target_patient_table="breast_cancer_patients",
+        clinician_first_name=current_user.first_name,
+        clinician_last_name=current_user.last_name,
     )
 
     # Re-fetch the patient to get it with the updated email and potentially user information
@@ -663,4 +684,38 @@ def set_patient_email(
 
     return ResponseModel[GetPatientResponse](
         data=inserted_patient, detail="Successfully assigned email"
+    )
+
+
+@router.get(
+    "/{patient_id}/report",
+    summary="Get breast cancer patient report",
+    description="Generate a PDF report about the requested breast cancer patient.",
+    response_class=Response(media_type="application/pdf"),
+    response_description="PDF content of the report as an attachment",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to generate the requested patient's report",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+    },
+)
+def get_patient_report(
+    patient: GetPatientResponse = Depends(validate_breast_cancer_patient_id),
+):
+    patient_title = patient.get_patient_title()
+    report_bytes = build_patient_report_pdf(patient, patient_title)
+    file_stem = slugify(f"Breast Cancer Report: {patient_title}", separator="_")
+    filename = f"{file_stem}.pdf"
+    return Response(
+        content=report_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{filename}",
+        },
     )

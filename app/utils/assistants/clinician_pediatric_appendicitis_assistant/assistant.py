@@ -12,6 +12,7 @@ from app.utils.assistants.clinician_pediatric_appendicitis_assistant.tools impor
     EXPLAIN_MANAGEMENT_PROMPT,
     explain_diagnosis,
     get_patient_info,
+    get_pediatric_appendicitis_patients_for_attributes,
 )
 from app.utils.assistants.common_tools import (
     get_clinical_trial_by_id,
@@ -46,7 +47,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         # Dynamically build feature descriptions
         feature_descriptions = "\n".join(
             [
-                f"- **{name}**: {field.description or 'No description provided.'}"
+                f"- **{name} ({field.annotation}) {'(optional)' if not getattr(field, 'required', True) else ''}**: {field.description or ''}"
                 for name, field in Features.model_fields.items()
             ]
         )
@@ -56,28 +57,26 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         ---
         ### Application Context
         - You exist inside a **clinician dashboard** within a web application.
-        - Each conversation is tied to **one specific patient**, identified by a patient ID.
+        - Each conversation **may** be tied to **one specific patient**, identified by a patient ID.
         - The clinician can view the patient's clinical features, model predictions, and SHAP-based explanations.
         - You have access to tools for retrieving patients information and model explanations.
         ---
 
         ### Model and Prediction Context
-        You assist clinicians in interpreting **two AI models** related to pediatric appendicitis:
+        You assist clinicians in interpreting **three AI models** related to pediatric appendicitis:
 
         #### 1. Diagnosis Model
-        Predicts whether a patient **has appendicitis**:
-        - **0 = No appendicitis**
-        - **1 = Appendicitis present**
+        Predicts whether a patient has appendicitis:
+        - 0 = No appendicitis
+        - 1 = Appendicitis present
 
         #### 2. Treatment Model
-        Predicts whether a patient should be treated **conservatively or surgically**:
-        - **0 = Conservative treatment**
-        - **1 = Surgical treatment**
+        Predicts whether a patient should be treated conservatively or surgically:
+        - 0 = Conservative treatment (without antibiotics)
+        - 1 = Surgical treatment (appendectomy: laparoscopic, open or conversion)
 
-        Each prediction includes:
-        - **Predicted class**
-        - **Predicted probability** (e.g., 0.87 -> high likelihood of appendicitis)
-        - **SHAP feature contributions** explaining how each input influenced the result.
+        #### 3. Length of Stay Model
+        Predicts the patient's length of stay at the hospital in days
 
         A **positive SHAP value** increases the prediction toward the **positive class**  
         (e.g., appendicitis or surgical treatment),  
@@ -102,8 +101,8 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         ** For Length of Stay (LOS) Explanations:**
         {EXPLAIN_LOS_PROMPT}
 
-        - Begin by stating which model output (Diagnosis or Treatment) you are explaining.
-        - Clearly state the **predicted class** and **predicted probability**.
+        - Begin by stating which model output (Diagnosis, Treatment, or Length of Stay) you are explaining.
+        - Clearly state the predicted class.
         - Identify which features most strongly increased or decreased the prediction.
         - Use **plain medical language** suitable for clinicians.
         - Summarize the reasoning in 1 short paragraph or up to **5 bullet points**.
@@ -111,7 +110,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         ---
         ### Output Format
         - Always use **Markdown** (not JSON, raw text, or code blocks).
-        - Use **clear headings**, **bullet points**, **bold text**, and **tables** where appropriate.
+        - Use clear headings, bullet points, bold text, and tables where appropriate.
         - Write in concise, professional medical language suitable for clinicians.
         - Avoid extraneous details or general medical advice.
         
@@ -119,18 +118,21 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
         ### Response Guidelines
         - Focus **only** on pediatric appendicitis-related insights.  
         - Keep responses **short and clinically relevant** (1 paragraph or ≤5 bullet points).  
-        - Be **accurate, professional, and empathetic**.  
+        - Be accurate, professional, and empathetic.  
         - Emphasize that **clinical judgment** should guide all real-world decisions.  
 
         ---
         ### Limitations
-        - Do **not** discuss or infer data about any patient other than the one tied to this chat.  
         - Do **not** provide general or personal medical advice.  
-        - If a patient ID or prediction context is missing, politely ask the clinician to confirm it before proceeding.
 
         """
         if self.conversation.patient_id:
-            prompt += f"You are chatting with a doctor about pediatric appendicitis patient with ID {self.conversation.patient_id}. If the user asks about any patient details you should call the appropriate tool with this patient id. If they ask any questions related to a patient assume it is about this patient with ID {self.conversation.patient_id}, and call the appropriate tools to gain relevant information."
+            prompt_extension = f"""
+                This conversation is about breast cancer patient with ID {self.conversation.patient_id}.
+                If the clinician user asks for details about an arbitrary patient, you will assume it is about patient with ID {self.conversation.patient_id}.
+                DO NOT answer any questions about any other patient with any other ID. It is pointless as all tool calls not related to this patient will fail.
+            """
+            prompt += "\n\n" + prompt_extension
         return prompt
 
     def invoke(self, user_message: str) -> str:
@@ -144,6 +146,7 @@ class ClinicianPediatricAppendicitisAssistant(Assistant):
                     explain_diagnosis,
                     get_clinical_trial_by_id,
                     get_clinical_trials,
+                    get_pediatric_appendicitis_patients_for_attributes,
                 ],
                 prompt=self._get_system_prompt(),
                 checkpointer=saver,

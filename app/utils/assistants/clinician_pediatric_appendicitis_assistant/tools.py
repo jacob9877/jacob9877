@@ -6,6 +6,11 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from app.utils.assistants.common_tools import (
+    GetPatientsForAttributesInput,
+    get_patients_for_attributes,
+    get_patients_for_attributes_description,
+)
 from app.utils.db import get_db_cursor_cm, get_pediatric_appendicitis_patient_by_id
 
 EXPLAIN_DIAGNOSIS_PROMPT = """
@@ -17,7 +22,7 @@ You will receive model explanation data (e.g., SHAP feature importances) and a l
 Use these to summarize **which clinical features most strongly influenced the model's diagnosis**.
 
 ### Model Output
-- Prediction type: **Diagnosis → "Appendicitis" or "No Appendicitis"**
+- Prediction type: **Diagnosis -> "Appendicitis" or "No Appendicitis"**
 
 ### Instructions
 1. Identify the top positive (risk-increasing) and negative (risk-decreasing) features.
@@ -26,20 +31,6 @@ Use these to summarize **which clinical features most strongly influenced the mo
    - Start with a concise summary (2-4 bullet points).
    - Follow with a Markdown table showing top features and their effects.
 4. If data is missing or unclear, acknowledge that politely.
-
-### Example Output
-#### Diagnosis Explanation
-- The model predicted **Appendicitis** with high confidence.
-- **Elevated WBC count** and **RLQ tenderness** increased the likelihood.
-- **Normal CRP** slightly reduced the risk.
-
-| Feature | Effect | Clinical Interpretation |
-|----------|---------|------------------------|
-| WBC count | ↑ | Suggests inflammation |
-| RLQ tenderness | ↑ | Indicates localized irritation |
-| CRP | ↓ | Normal value reduces suspicion |
-
-Always respond in **Markdown** format.
 """
 
 EXPLAIN_MANAGEMENT_PROMPT = """
@@ -47,7 +38,7 @@ You are a clinical AI assistant explaining the **management recommendation**
 (conservative vs surgical) for a pediatric appendicitis patient.
 
 ### Model Output
-- Prediction type: **Management → "Conservative" or "Surgical"**
+- Prediction type: **Management -> "Conservative" or "Surgical"**
 
 ### Instructions
 1. Identify which features most strongly contributed to the management recommendation.
@@ -83,7 +74,9 @@ class GetPatientInfoInput(BaseModel):
     args_schema=GetPatientInfoInput,
 )
 def get_patient_info(patient_id: int, *, config: RunnableConfig) -> dict:
-    if patient_id != config["configurable"].get("patient_id"):
+    if config["configurable"].get("patient_id") and patient_id != config[
+        "configurable"
+    ].get("patient_id"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tool input patient_id does not match the patient_id of the conversation scope.",
@@ -178,3 +171,27 @@ def explain_diagnosis(
     row.pop("clinician_user_id")
     row[explanation_column] = json.loads(row[explanation_column])
     return row
+
+
+@tool(
+    description=get_patients_for_attributes_description,
+    args_schema=GetPatientsForAttributesInput,
+)
+def get_pediatric_appendicitis_patients_for_attributes(
+    name: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    email: str | None = None,
+    *,
+    config: RunnableConfig,
+) -> list[dict]:
+    clinician_user_id = config["configurable"]["user_id"]
+
+    return get_patients_for_attributes(
+        clinician_user_id,
+        "pediatric_appendicitis_patients",
+        name,
+        first_name,
+        last_name,
+        email,
+    )

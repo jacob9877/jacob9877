@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from mysql.connector.cursor import MySQLCursorDict
 
@@ -132,10 +132,9 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
 @router.post(
     "/register",
     summary="Register a new user",
-    description="Creates a new user account with a unique email. Returns nothing upon success. Must log in separately to get an access token.",
-    response_model=ResponseModel[None],
-    response_description="Returns nothing on success",
-    status_code=status.HTTP_201_CREATED,
+    description="Creates a new user account with a unique email. Must log in separately to get an access token.",
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_409_CONFLICT: {
             "model": ResponseModel[None],
@@ -144,7 +143,7 @@ def register_patient(cursor: MySQLCursorDict, register_request: RegisterRequest)
     },
 )
 def register(
-    register_request: RegisterRequest,
+    register_request: RegisterRequest = Body(...),
     cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     # Check if user exists with provided email
@@ -166,9 +165,7 @@ def register(
     else:
         register_patient(cursor, register_request)
 
-    return ResponseModel[None](
-        detail="User registered successfully",
-    )
+    return
 
 
 @router.post(
@@ -187,9 +184,8 @@ def register(
     - Generates a reset token (valid 15 mins).
     - Sends reset link to user's email.
     """,
-    response_model=ResponseModel[None],
-    response_description="Returns a confirmation message as detail; not significant",
-    status_code=status.HTTP_200_OK,
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_404_NOT_FOUND: {
             "model": ResponseModel[None],
@@ -198,7 +194,8 @@ def register(
     },
 )
 async def request_password_reset(
-    data: PasswordResetRequest, cursor: MySQLCursorDict = Depends(get_db_cursor)
+    data: PasswordResetRequest = Body(...),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     cursor.execute("SELECT id FROM users WHERE email = %s", (data.email,))
     user = cursor.fetchone()
@@ -216,9 +213,8 @@ async def request_password_reset(
     token = jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
 
     await send_reset_email(data.email, token)
-    return ResponseModel[None](
-        detail="Password reset email sent",
-    )
+
+    return
 
 
 @router.post(
@@ -243,9 +239,8 @@ async def request_password_reset(
     - Updates the user’s password in DB (hashed).
     - Returns confirmation on success.
     """,
-    response_model=ResponseModel[None],
-    response_description="Return is not meaningful; status code indicates success of password reset",
-    status_code=status.HTTP_200_OK,
+    response_description="Nothing",
+    status_code=status.HTTP_204_NO_CONTENT,
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "model": ResponseModel[None],
@@ -254,7 +249,8 @@ async def request_password_reset(
     },
 )
 def reset_password(
-    data: PasswordResetConfirm, cursor: MySQLCursorDict = Depends(get_db_cursor)
+    data: PasswordResetConfirm = Body(...),
+    cursor: MySQLCursorDict = Depends(get_db_cursor),
 ):
     try:
         payload = jwt.decode(data.token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
@@ -276,9 +272,8 @@ def reset_password(
             (hashed_pw, user_id),
         )
 
-        return ResponseModel[None](
-            detail="Password has been reset successfully",
-        )
+        return
+
     except jwt.ExpiredSignatureError:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,

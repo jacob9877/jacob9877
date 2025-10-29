@@ -1,7 +1,8 @@
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
+from app.models.common_models import EmailConstrained, StrStripWhitespace
 from app.models.user_models import RoleAndCondition, UserSummary
 
 
@@ -18,8 +19,10 @@ class TokenPayload(RoleAndCondition):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(..., example="user@example.com")
-    password: str = Field(..., example="password123")
+    email: EmailConstrained = Field(
+        ..., example=""
+    )  # Explicitly set empty string because it makes it easier to log in on the OpenAPI docs
+    password: StrStripWhitespace  # Policy: trim leading and trailing whitespace before checking user's password
 
 
 class LoginResponse(BaseModel):
