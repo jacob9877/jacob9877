@@ -1,11 +1,11 @@
 from typing import Literal
 
-
 from app.models.breast_cancer_patient_models import Features as BreastCancerFeatures
+from app.models.common_models import Timestamps
 from app.models.pediatric_appendicitis_patient_models import (
     Features as PediatricAppendicitisFeatures,
 )
-from app.models.common_models import Timestamps
+from app.models.pediatric_appendicitis_patient_models import ImageResponse
 from app.models.user_models import UserSummary
 
 
@@ -27,3 +27,4 @@ class GetPediatricAppendicitisPatientPortalResponse(
     length_of_stay_pred: float | None = None
     length_of_stay_pi_lower: float | None = None
     length_of_stay_pi_upper: float | None = None
+    images: list[ImageResponse]
