@@ -11,8 +11,10 @@ from fastapi import (
     Query,
     Security,
     status,
+    Response,
 )
 from mysql.connector.cursor import MySQLCursorDict
+from slugify import slugify
 
 from app.models.common_models import ResponseModel
 from app.models.patient_models import SetPatientEmailRequest
@@ -50,6 +52,7 @@ from app.utils.dependencies import (
     validate_pediatric_appendicitis_patient_id,
 )
 from app.utils.pagination import decode_cursor, encode_cursor
+from app.utils.reports.pediatric_appendicitis_patient_report import build_patient_report_pdf
 
 router = APIRouter(
     prefix="/pediatric-appendicitis-patients",
@@ -747,4 +750,40 @@ async def set_patient_email(
 
     return ResponseModel[GetPatientResponseWithImages](
         data=patient_with_images, detail="Successfully assigned email"
+    )
+
+
+@router.get(
+    "/{patient_id}/report",
+    summary="Get pediatric appendicitis patient report",
+    description="Generate a PDF report about the requested pediatric appendicitis patient.",
+    response_class=Response(media_type="application/pdf"),
+    response_description="PDF content of the report as an attachment",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ResponseModel[None],
+            "description": "Not authorized to generate the requested patient's report",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ResponseModel[None],
+            "description": "Patient not found",
+        },
+    },
+)
+def get_patient_report(
+    patient: GetPatientResponse = Depends(validate_pediatric_appendicitis_patient_id),
+):
+    patient_title = patient.get_patient_title()
+    report_bytes = build_patient_report_pdf(patient, patient_title)
+    file_stem = slugify(
+        f"pediatric appendicitis Report: {patient_title}", separator="_"
+    )
+    filename = f"{file_stem}.pdf"
+    return Response(
+        content=report_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"; filename*=UTF-8''{filename}",
+        },
     )

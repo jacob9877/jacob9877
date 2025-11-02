@@ -315,6 +315,26 @@ class Predictions(BaseModel):
     length_of_stay_pi_lower: float
     length_of_stay_pi_upper: float
 
+    def get_diagnosis_text(self):
+        if self.diagnosis == "no appendicitis":
+            return "no appendicitis"
+        return "appendicitis"
+
+    def get_management_text(self):
+        if self.management == "conservative":
+            return "conservative"
+        return "surgical"
+
+    def get_length_of_stay_text(self, include_interval: bool = True) -> str:
+        los_str = f"{self.length_of_stay_pred:.1f} days"
+        if include_interval:
+            los_str += (
+                f", with a 95% chance the actual stay will be between {self.length_of_stay_pi_lower:.1f} and "
+                f"{self.length_of_stay_pi_upper:.1f} days"
+            )
+
+        return f"Predicted hospital stay: approximately {los_str}"
+
 
 class Approvals(BaseModel):
     diagnosis_approval_status: ApprovalStatus | None = None
@@ -341,7 +361,18 @@ class ImageResponse(ImageBase):
     created_at: datetime
 
 
-class GetPatientResponse(Patient, PatientUserInfo): ...
+class GetPatientResponse(Patient, PatientUserInfo):
+    def get_patient_title(self) -> str:
+        if self.patient_user_info:
+            if self.patient_user_info.first_name and self.patient_user_info.last_name:
+                return (
+                    self.patient_user_info.first_name
+                    + " "
+                    + self.patient_user_info.last_name
+                )
+        if self.name:
+            return self.name
+        return f"Patient {self.id}"
 
 
 class GetPatientResponseWithImages(GetPatientResponse):
