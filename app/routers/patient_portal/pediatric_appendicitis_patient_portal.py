@@ -11,7 +11,7 @@ from app.models.pediatric_appendicitis_patient_models import (
     Patient,
 )
 from app.models.user_models import Condition, User, UserSummary
-from app.utils.db import get_db_cursor
+from app.utils.db import get_db_cursor, get_images_for_pediatric_appendicitis_patient
 from app.utils.dependencies import get_current_user, patients_with, require_access
 
 router = APIRouter(
@@ -94,9 +94,16 @@ def get_current_patient_info(
                 "length_of_stay_pi_upper",
             ]
         )
+
+    # Get any images associated with the patient
+    images = get_images_for_pediatric_appendicitis_patient(
+        cursor, patient.id, patient.clinician_user_id
+    )
+
     response = GetPediatricAppendicitisPatientPortalResponse(
         **patient.model_dump(include=set(patient_fields_to_include)),
         clinician_user_info=row,
+        images=images,
     )
     return ResponseModel[GetPediatricAppendicitisPatientPortalResponse](
         data=response, detail="Patient info retrieved successfully"

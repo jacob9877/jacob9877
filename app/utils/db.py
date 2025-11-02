@@ -15,7 +15,12 @@ from app.models.conversation_models import Conversation
 from app.models.pediatric_appendicitis_patient_models import (
     GetPatientResponse as GetPediatricAppendicitisPatientResponse,
 )
+from app.models.pediatric_appendicitis_patient_models import ImageResponse
 from app.models.user_models import Condition, Role, RoleAndCondition, User
+from app.utils.aws import (
+    build_pediatric_appendicitis_s3_image_key,
+    create_presigned_url,
+)
 from app.utils.email_utils import send_registration_email
 
 DB_HOST = os.environ["DB_HOST"]
@@ -243,6 +248,32 @@ def get_pediatric_appendicitis_clinical_note_by_id(
     if row is None:
         return None
     return ClinicalNote(**row)
+
+
+def get_images_for_pediatric_appendicitis_patient(
+    cursor: MySQLCursorDict, patient_id: int, clinician_user_id: int
+) -> list[ImageResponse]:
+    operation = """
+        SELECT upload_id, file_type, name, created_at
+        FROM pediatric_appendicitis_images
+        WHERE patient_id=%s
+    """
+    params = (patient_id,)
+    cursor.execute(operation, params)
+    rows = cursor.fetchall()
+
+    # Build upload_id, pre-signed url pairs for each image
+    images: list[ImageResponse] = []
+    for row in rows:
+        s3_key = build_pediatric_appendicitis_s3_image_key(
+            clinician_user_id, row["upload_id"], row["file_type"]
+        )
+        presigned_url = create_presigned_url(
+            bucket=os.environ["PEDIATRIC_APPENDICITIS_IMAGES_BUCKET"], key=s3_key
+        )
+        images.append(ImageResponse(**row, url=presigned_url))
+
+    return images
 
 
 async def insert_pending_email(

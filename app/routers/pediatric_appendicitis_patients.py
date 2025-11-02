@@ -24,7 +24,6 @@ from app.models.pediatric_appendicitis_patient_models import (
     Features,
     GetPatientResponse,
     GetPatientResponseWithImages,
-    ImageResponse,
     PaginatedPatients,
     PostImagesRequest,
     Predictions,
@@ -34,14 +33,17 @@ from app.models.pediatric_appendicitis_patient_models import (
 )
 from app.models.user_models import User, UserSummary
 from app.utils.aws import (
+    build_pediatric_appendicitis_s3_image_key as build_s3_image_key,
+)
+from app.utils.aws import (
     bulk_send_message_to_sqs,
     create_presigned_post_for_image,
-    create_presigned_url,
     get_predictions,
     s3_file_exists,
 )
 from app.utils.db import (
     get_db_cursor,
+    get_images_for_pediatric_appendicitis_patient,
     get_pediatric_appendicitis_patient_by_id,
     insert_pending_email,
 )
@@ -66,13 +68,9 @@ router = APIRouter(
     dependencies=[Security(require_access(clinicians_only()))],
 )
 
-IMAGES_BUCKET = "pediatric-appendicitis-images"
+IMAGES_BUCKET = os.environ["PEDIATRIC_APPENDICITIS_IMAGES_BUCKET"]
 SAGEMAKER_ENDPOINT_NAME = "pediatric-appendicitis"
 EXPLANATION_QUEUE_URL = os.environ["PEDIATRIC_APPENDICITIS_EXPLANATION_QUEUE_URL"]
-
-
-def build_s3_image_key(user_id: int, upload_id: str, file_type: str) -> str:
-    return f"{user_id}/{upload_id}.{file_type}"
 
 
 @router.post(
@@ -184,24 +182,9 @@ def _insert_patient(
 def package_patient_with_images(
     cursor: MySQLCursorDict, get_patient_response: GetPatientResponse
 ) -> GetPatientResponseWithImages:
-    # Fetch any images associated with the patient
-    operation = """
-        SELECT upload_id, file_type, name, created_at
-        FROM pediatric_appendicitis_images
-        WHERE patient_id=%s
-    """
-    params = (get_patient_response.id,)
-    cursor.execute(operation, params)
-    rows = cursor.fetchall()
-
-    # Build upload_id, pre-signed url pairs for each image
-    images: list[ImageResponse] = []
-    for row in rows:
-        s3_key = build_s3_image_key(
-            get_patient_response.clinician_user_id, row["upload_id"], row["file_type"]
-        )
-        presigned_url = create_presigned_url(IMAGES_BUCKET, s3_key)
-        images.append(ImageResponse(**row, url=presigned_url))
+    images = get_images_for_pediatric_appendicitis_patient(
+        cursor, get_patient_response.id, get_patient_response.clinician_user_id
+    )
 
     patient_with_images = GetPatientResponseWithImages(
         **get_patient_response.model_dump(), images=images

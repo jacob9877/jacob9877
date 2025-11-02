@@ -132,3 +132,9 @@ def s3_file_exists(bucket: str, key: str):
             # Handle other potential errors (e.g., permissions)
             print(f"An error occurred: {e}")
             raise
+
+
+def build_pediatric_appendicitis_s3_image_key(
+    user_id: int, upload_id: str, file_type: str
+) -> str:
+    return f"{user_id}/{upload_id}.{file_type}"
