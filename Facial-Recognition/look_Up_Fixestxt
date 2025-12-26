@@ -1,0 +1,7 @@
+--Changes to fix
+
+-- Images download problem
+  -- Sometimes Images don't download because of some restriction 
+-- Does not create create the directory correctly
+  -- Creates directory for image, then creates training
+  -- Should /training/subject name.

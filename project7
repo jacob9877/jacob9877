@@ -1,0 +1,61 @@
+/*
+This program implements the bubble sort algorithm to sort an array of integers in ascending order.
+
+    1. The swap function takes two pointers to integers a and b and swaps the values they point to.
+    2. The bubbleSort function takes an array arr, its size n, and a pointer count to store the number of swaps performed during the sorting process.
+        It uses nested loops to compare adjacent elements and swap them if they are in the wrong order. The outer loop iterates over the array from the 
+        beginning to the second-to-last element, and the inner loop iterates over the unsorted portion of the array. If an element is larger than the 
+        next element, they are swapped using the swap function, and the count is incremented.
+    3. The printArray function takes an array arr, its size size, and the count of swaps performed during sorting. It prints the elements of the sorted 
+        array and the number of swaps performed.
+    4. In the main function, an array arr of size 9 is initialized with the values {97, 16, 45, 63, 13, 22, 7, 58, 72}. The bubbleSort function is 
+        called with arr, its size n, and a variable count to store the number of swaps. The sorted array and the number of swaps performed are then 
+        printed using the printArray function.
+*/
+#include <stdlib.h>
+#include <stdio.h>
+
+void swap(int *a, int *b)
+{
+    int temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+void bubbleSort(int arr[], int n, int *count)
+{
+    *count = 0;
+    int i, j;
+    for (i = 0; i < n - 1; i++)
+    {
+        for (j = 0; j < n - i - 1; j++)
+        {
+            if (arr[j] > arr[j + 1])
+            {
+                swap(&arr[j], &arr[j + 1]);
+                *(count)++;
+            }
+        }
+    }
+}
+
+void printArray(int arr[], int size, int count)
+{
+    int i;
+    for (i = 0; i < size; i++)
+    {
+        printf("%d ", arr[i]);
+    }
+    printf("\nThe number of swaps = %d\n", count);
+}
+
+int main()
+{
+    int arr[] = {97, 16, 45, 63, 13, 22, 7, 58, 72};
+    int n = 9;
+    int count;
+    bubbleSort(arr, n, &count);
+    printf("Sorted array: \n");
+    printArray(arr, n, count);
+    return 0;
+}

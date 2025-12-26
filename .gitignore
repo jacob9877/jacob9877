@@ -5,4 +5,4 @@ __pycache__
 .python-version
 .DS_Store
 .ruff_cache
-venv/
+venv/.DS_Store

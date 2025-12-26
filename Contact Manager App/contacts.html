@@ -1,0 +1,92 @@
+<html>
+  <head>
+    <title>Contacts</title>
+    <link href="css/contacts.css" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css?family=Roboto"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="header">
+      <div class="header-left">
+        <svg
+          class="header-icon"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path
+            fill-rule="evenodd"
+            d="M18.685 19.097A9.723 9.723 0 0 0 21.75 12c0-5.385-4.365-9.75-9.75-9.75S2.25 6.615 2.25 12a9.723 9.723 0 0 0 3.065 7.097A9.716 9.716 0 0 0 12 21.75a9.716 9.716 0 0 0 6.685-2.653Zm-12.54-1.285A7.486 7.486 0 0 1 12 15a7.486 7.486 0 0 1 5.855 2.812A8.224 8.224 0 0 1 12 20.25a8.224 8.224 0 0 1-5.855-2.438ZM15.75 9a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+            clip-rule="evenodd"
+          />
+        </svg>
+        <h1 class="header-title">Contacts</h1>
+      </div>
+      <div class="header-right">
+        <button class="header-button" onclick="signOut()">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+            class="button-icon"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M8.25 9V5.25A2.25 2.25 0 0 1 10.5 3h6a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 16.5 21h-6a2.25 2.25 0 0 1-2.25-2.25V15m-3 0-3-3m0 0 3-3m-3 3H15"
+            />
+          </svg>
+          <span>Sign Out</span>
+        </button>
+      </div>
+    </div>
+    <div class="main">
+      <div class="sidebar">
+        <div class="search-box">
+          <input
+            type="text"
+            class="search-input"
+            id="search-input"
+            placeholder="Search Contacts"
+            oninput="searchContacts()"
+          />
+          <button class="search-button" onclick="buildContact()">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+              class="search-button-icon"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M12 4.5v15m7.5-7.5h-15"
+              />
+            </svg>
+          </button>
+        </div>
+        <div class="contact-list">
+          <div class="contact-item">
+            <div class="contact-text">
+              <h3>No Contacts</h3>
+              <p>Click the plus to add contacts.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="contact-details">
+        <div class="contact-image-container">
+          <img src="empty.png" class="contact-image" />
+          <h2>Select a Contact from the Sidebar</h2>
+        </div>
+      </div>
+    </div>
+    <script src="js/contacts.js"></script>
+  </body>
+</html>

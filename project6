@@ -1,0 +1,111 @@
+/*
+This code implements a binary search algorithm to search for a value in a sorted array of integers. Here's a breakdown of what the code does:
+
+1. The search function takes an array of integers numbers, along with the lower and upper bounds (low and high) of the subarray being searched, and the value to be searched for. It performs a binary search on the subarray and returns the index of the value if found, or -1 if not found.
+2. The printArray function takes an array of integers numbers and its size sz, and prints the elements of the array.
+3. In the main function:
+    It opens a file named "input.txt" for reading.
+    It reads the number of inputs (numInputs) from the file.
+    For each input:
+
+        It reads the number of integers (countOfNums) in the current input.
+        It dynamically allocates memory for an array of integers (numArray) of size countOfNums.
+        It reads countOfNums integers from the file and stores them in numArray.
+        It prints the contents of numArray using the printArray function.
+        It calculates the average of the integers in numArray.
+        It calls the search function to find the index of the average value in numArray.
+        If the average value is found, it prints a message indicating the value and its index.
+        If the average value is not found, it prints a message indicating that the value does not exist in the array.
+        It frees the dynamically allocated memory for numArray.
+
+    After processing all inputs, it closes the input file.
+*/
+
+#include <stdio.h>
+
+// Function to perform binary search on a sorted array
+// Returns the index of the value if found, otherwise -1
+int search(int numbers[], int low, int high, int value) {
+    if (low > high) {
+        // Value not found in the array
+        return -1;
+    }
+
+    int mid = low + (high - low) / 2;
+
+    if (numbers[mid] == value) {
+        // Value found at the middle index
+        return mid;
+    } else if (value > numbers[mid]) {
+        // Value is in the upper half of the array
+        return search(numbers, mid + 1, high, value);
+    } else {
+        // Value is in the lower half of the array
+        return search(numbers, low, mid - 1, value);
+    }
+}
+
+// Function to print the elements of an array
+void printArray(int numbers[], int sz) {
+    int i;
+    printf("Number array : ");
+    for (i = 0; i < sz; ++i) {
+        printf("%d ", numbers[i]);
+    }
+    printf("\n");
+}
+
+int main(void) {
+    int i, numInputs;
+    char* str;
+    float average;
+    int value;
+    int index;
+    int* numArray = NULL;
+    int countOfNums;
+
+    // Open the input file for reading
+    FILE* inFile = fopen("input.txt", "r");
+
+    // Read the number of inputs from the file
+    fscanf(inFile, " %d\n", &numInputs);
+
+    while (numInputs-- > 0) {
+        // Read the number of integers in the current input
+        fscanf(inFile, " %d\n", &countOfNums);
+
+        // Dynamically allocate memory for the array
+        numArray = (int*)malloc(countOfNums * sizeof(int));
+
+        average = 0;
+        for (i = 0; i < countOfNums; i++) {
+            // Read an integer from the file and store it in the array
+            fscanf(inFile, " %d", &value);
+            numArray[i] = value;
+            average += numArray[i];
+        }
+
+        // Print the contents of the array
+        printArray(numArray, countOfNums);
+
+        // Calculate the average of the integers in the array
+        value = average / countOfNums;
+
+        // Search for the average value in the array
+        index = search(numArray, 0, countOfNums - 1, value);
+
+        if (index >= 0) {
+            // Average value found in the array
+            printf("Item %d exists in the number array at index %d!\n", value, index);
+        } else {
+            // Average value not found in the array
+            printf("Item %d does not exist in the number array!\n", value);
+        }
+
+        // Free the dynamically allocated memory
+        free(numArray);
+    }
+
+    // Close the input file
+    fclose(inFile);
+}

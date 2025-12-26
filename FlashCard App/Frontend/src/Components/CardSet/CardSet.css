@@ -1,0 +1,235 @@
+.topButtons {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.circleButton {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  font-size: 50px;
+  transition: 0.2s;
+  background-color: #e4b1f0;
+  color: white;
+}
+
+.circleButton:hover {
+  background-color: #fc90af;
+  transform: scale(1.1);
+}
+
+#backMenu {
+  width: 60px;
+  height: 60px;
+  margin: 0;
+  background-color: #e4b1f0;
+  border-radius: 50%;
+  padding: 10px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+#backMenu:hover {
+  background-color: #fc90af;
+  transform: scale(1.1);
+}
+.studyButton {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.studyButton:hover {
+  transform: translateX(-50%) scale(1.1);
+}
+.studyButton img {
+  width: 50%;
+  height: 50%;
+  object-fit: contain;
+}
+
+.addButton {
+  background-color: #e4b1f0;
+  color: white;
+  font-size: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.addButton:hover {
+  background-color: #fc90af;
+}
+
+.listCards {
+  margin-top: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  padding: 15px;
+}
+
+h1 {
+  margin-top: 120px;
+  color: white;
+}
+
+/* Restored and updated card styles */
+.card,
+.addCardForm {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 80vw;
+  margin: 10px 0;
+  font-size: 20px;
+  text-align: left;
+  text-shadow: 1px 2px 7px #222;
+  padding: 20px;
+  color: white;
+  background-color: #8f61db;
+  border-radius: 60px;
+  transition: 0.2s;
+  overflow: visible;
+  height: auto;
+  min-height: 60px;
+  box-sizing: border-box;
+}
+
+.card {
+  cursor: pointer;
+}
+
+.card:hover {
+  background-color: #fc90af;
+  box-shadow: 0px 0px 10px #edbbce;
+  transform: scale(1.05);
+}
+
+.addCardForm {
+  margin-bottom: 20px;
+}
+
+.addCardForm input[type="text"] {
+  width: 100%;
+  padding: 10px;
+  margin: 10px 0;
+  border: none;
+  border-radius: 30px;
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 16px;
+  transition: 0.3s;
+  box-sizing: border-box;
+}
+
+.addCardForm input[type="text"]:focus {
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.addCardForm input[type="text"]::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.makeCard {
+  align-self: flex-end;
+  padding: 10px 20px;
+  margin: 10px 0;
+  border: none;
+  border-radius: 30px;
+  background-color: #e4b1f0;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.makeCard:hover {
+  background-color: #fc90af;
+}
+.editForm button,
+.makeCard {
+  padding: 10px 20px;
+  margin: 10px 0;
+  border: none;
+  border-radius: 30px;
+  background-color: #e4b1f0;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.editForm button:hover,
+.makeCard:hover {
+  background-color: #fc90af;
+}
+
+/* Additional styles for edit functionality */
+.card.editing {
+  height: auto;
+}
+
+.card-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.questionAnswer {
+  flex-grow: 1;
+}
+
+.editDelete2 {
+  display: flex;
+  gap: 10px;
+}
+
+.editForm {
+  margin-top: 15px;
+}
+
+.editForm input[type="text"] {
+  width: 100%;
+  padding: 10px;
+  margin: 5px 0;
+  border: none;
+  border-radius: 15px;
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 16px;
+}
+
+.editButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.editButtons button {
+  padding: 5px 15px;
+  border: none;
+  border-radius: 15px;
+  background-color: #e4b1f0;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.editButtons button:hover {
+  background-color: #d39fe0;
+}

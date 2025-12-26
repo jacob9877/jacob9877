@@ -1,0 +1,116 @@
+/*
+This code defines a simple linked list data structure with a node struct that contains a character and a pointer to the next node. It provides the following functions:
+
+1. length(node *head): Returns the number of nodes in the linked list.
+2. toCString(node *head): Converts the linked list into a C string and returns a dynamically allocated char array containing the string.
+3. insertChar(node **pHead, char c): Inserts a character c at the end of the linked list.
+4. deleteList(node **pHead): Deletes all nodes in the linked list and frees the allocated memory.
+*/
+#include <stdio.h>
+#include <stdlib.h>
+
+// Definition of a node in a linked list
+typedef struct node {
+    char letter;
+    struct node *next;
+} node;
+
+// Returns the number of nodes in the linked list
+int length(node *head) {
+    node* tmp = head;
+    int count = 0;
+    while (tmp != NULL) {
+        tmp = tmp->next;
+        count++;
+    }
+    return count;
+}
+
+// Converts the linked list to a C string
+// If the linked list is head -> |a|->|b|->|c|, this function will return "abc"
+char* toCString(node* head) {
+    int len = length(head);
+    char* str = malloc(sizeof(char) * (len + 1));
+    node* current = head;
+    int i = 0;
+    if (current == NULL) {
+        return NULL;
+    }
+    while (current != NULL) {
+        str[i] = current->letter;
+        current = current->next;
+        i++;
+    }
+    str[i] = '\0';
+    return str;
+}
+
+// Inserts a character into the linked list
+// If the linked list is head -> |a|->|b|->|c|, then insertChar(&head, 'x') will update the linked list as follows:
+// head -> |a|->|b|->|c|->|x|
+void insertChar(node **pHead, char c) {
+    node* newNode = malloc(sizeof(node));
+    newNode->letter = c;
+    newNode->next = NULL;
+    if (*pHead == NULL) {
+        *pHead = newNode;
+    } else {
+        node* current = *pHead;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = newNode;
+    }
+}
+
+// Deletes all nodes in the linked list
+void deleteList(node **pHead) {
+    node* current = *pHead;
+    node* tmp;
+    while (current != NULL) {
+        tmp = current->next;
+        free(current);
+        current = tmp;
+    }
+    *pHead = NULL;
+}
+
+int main(void) {
+    int i, strLen, numInputs;
+    node *head = NULL;
+    char *str;
+    char c;
+
+    // Open the input file for reading
+    FILE *inFile = fopen("input.txt", "r");
+
+    // Read the number of inputs from the file
+    fscanf(inFile, " %d\n", &numInputs);
+
+    while (numInputs-- > 0) {
+        // Read the length of the string
+        fscanf(inFile, " %d\n", &strLen);
+
+        for (i = 0; i < strLen; i++) {
+            // Read a character from the file and insert it into the linked list
+            fscanf(inFile, " %c", &c);
+            insertChar(&head, c);
+        }
+
+        // Convert the linked list to a C string and print it
+        str = toCString(head);
+        printf("String is : %s\n", str);
+        free(str);
+
+        // Delete all nodes in the linked list
+        deleteList(&head);
+
+        if (head != NULL) {
+            printf("deleteList is not correct!");
+            break;
+        }
+    }
+
+    // Close the input file
+    fclose(inFile);
+}

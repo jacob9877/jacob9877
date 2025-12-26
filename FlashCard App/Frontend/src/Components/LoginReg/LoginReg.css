@@ -1,0 +1,126 @@
+.container
+{
+   display: flex;
+   flex-direction: column;
+   margin: auto;
+   margin-top: 300px; 
+   background: transparent;
+   max-width: fit-content;
+   max-height: fit-content;
+   border-radius: 20px;
+   backdrop-filter: blur(40px);
+   box-shadow: 0px 0px 12px rgb(173, 173, 173);
+   padding:20px;
+   text-align: center;
+}
+
+.header
+{
+    font-size: 50px;
+    font-weight: 600;
+    color: white;
+    text-shadow: 0px 0px 4px black;
+}
+
+.backArrow
+{
+    position: absolute;
+    margin-top: 4px;
+}
+
+.backArrow img
+{
+    outline: none;
+    border: none;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.backArrow img:hover
+{
+    transform: scale(1.1);
+}
+
+.inputs
+{
+    margin-top: 10px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap:10px;
+}
+
+.input input
+{
+    font-size: 25px;
+    padding: 8px 16px;
+    border-radius: 50px;
+    border: none;
+    outline: none;
+    transition: 0.2s;
+}
+
+.input input:focus
+{
+    transform: scale(1.05);
+    box-shadow: 0px 0px 8px black;
+}
+
+.forgotxLorR
+{
+    display: flex;
+    /* flex-direction: row; */
+    gap:90px;
+}
+
+.forgotPassword
+{
+    padding-left: 16px;
+    cursor: pointer;
+    font-size: 15px;
+    color:white
+}
+
+.LorR
+{
+    cursor: pointer;
+    font-size: 15px;
+    color:white
+}
+
+.forgotPassword:hover, .LorR:hover
+{
+    text-shadow: 0px 0px 2px black;
+}
+
+.submit
+{
+    display: flex;
+    margin: auto;
+    margin-top: 10px;
+    justify-content: center;
+    align-items: center;
+    width:150px;
+    height:50px;
+    color: white;
+    background-color: #ad669a ;
+    border-radius: 40px;
+    font-size: 25px;
+    padding:3px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.submit:hover
+{
+    transform: scale(1.1);
+    box-shadow: 0px 0px 8px black;
+}
+
+#resultText
+{
+    margin-top: 7px;
+    color: white;
+}
