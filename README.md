@@ -1,6 +1,6 @@
 # 👋 Hi, I'm Jacob!
 
-🎓 CS Student @ UCF | Graduating Dec 2025  
+🎓 CS Student @ UCF | Graduated on Dec 2025  
 ☁️ Backend • Cloud • Machine Learning • FastAPI • AWS  
 🔍 Seeking 2025 SWE / Backend / Cloud Internships & Full-time roles
 
