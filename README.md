@@ -12,7 +12,7 @@
 **Databases:** MySQL, MongoDB  
 
 ## 📌 Featured Projects
-### 🔹 AI for Meical Outcomes – Backend + Model Deployment
+### 🔹 AI for Medical Outcomes – Backend + Model Deployment
 FastAPI backend that integrates AWS SageMaker for complication prediction models.  
 Role-based authentication, secure cookies, Dockerized Lambda deployment.
 
