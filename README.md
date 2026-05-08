@@ -25,7 +25,7 @@ JWT auth, card management, DigitalOcean DB integration.
 ## 📫 Connect with me  
 LinkedIn: https://www.linkedin.com/in/jacob-m-26883120b/  
 Email: jacobrajan9876@gmail.com
-# AI for Bariatric Surgery API
+# AI for Medical Outcomes API
 
 ## Environment setup
 
